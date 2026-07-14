@@ -25,7 +25,7 @@ jobs:
         pip install grpcio grpcio-tools
 
     - name: Set up Bazel
-      uses: bazelbuild/setup-bazel@v3
+      uses: bazel-contrib/setup-bazel@v0.13.0
       with:
         bazel-version: 7.4.1
 
