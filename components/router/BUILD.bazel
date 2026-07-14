@@ -1,0 +1,19 @@
+load("@rules_python//python:defs.bzl", "py_binary")
+
+py_binary(
+    name = "router_v1",
+    srcs = ["router_v1.py"],
+    deps = [
+        "//proto:telemetry_py_grpc",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+py_binary(
+    name = "router_v2",
+    srcs = ["router_v2.py"],
+    deps = [
+        "//proto:telemetry_py_grpc",
+    ],
+    visibility = ["//visibility:public"],
+)

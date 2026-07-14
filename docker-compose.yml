@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  # V1 Baseline SDK Sidecar
+  codesign-v1-baseline:
+    build: .
+    container_name: arm-codesign-v1-baseline
+    command: [ "python", "components/router/router_v1.py" ]
+    environment:
+      - ROUTER_PORT=50051
+      - REASONING_PORT=50052
+    ports:
+      - "50051:50051"
+      - "50052:50052"
+    restart: unless-stopped
+
+  # V2 Adaptive SDK Sidecar
+  codesign-v2-adaptive:
+    build: .
+    container_name: arm-codesign-v2-adaptive
+    command: [ "python", "components/router/router_v2.py" ]
+    environment:
+      - ROUTER_PORT=50053
+      - REASONING_PORT=50054
+    ports:
+      - "50053:50053"
+      - "50054:50054"
+    restart: unless-stopped

@@ -1,0 +1,75 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: arm-codesign
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: codesign-v2-adaptive
+  namespace: arm-codesign
+  labels:
+    app: codesign-v2-adaptive
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: codesign-v2-adaptive
+  template:
+    metadata:
+      labels:
+        app: codesign-v2-adaptive
+    spec:
+      containers:
+        # Container 1: The Router Server (Public Face of the Pod)
+        - name: router-v2
+          image: arm-codesign-registry/router-v2:latest # Placeholder for built registry image
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 50051
+              name: router-port
+          environment:
+            - name: ROUTER_PORT
+              value: "50051"
+            - name: REASONING_PORT
+              value: "50052" # Connects to sidecar over shared Pod loopback
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+
+        # Container 2: The Reasoning Engine (Internal Sidecar)
+        - name: reasoning-v2
+          image: arm-codesign-registry/reasoning-v2:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 50052
+              name: reasoning-port
+          environment:
+            - name: REASONING_PORT
+              value: "50052"
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: codesign-v2-service
+  namespace: arm-codesign
+spec:
+  selector:
+    app: codesign-v2-adaptive
+  ports:
+    - protocol: TCP
+      port: 50051
+      targetPort: 50051
+      name: grpc-router
+  type: ClusterIP
