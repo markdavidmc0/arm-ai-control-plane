@@ -34,3 +34,16 @@ dist/
 .idea/
 *.swp
 *.swo
+
+# Dynamically Generated Telemetry & Visualizer Artifacts
+vectorization_heatmap.html
+
+# Compiled C++ Executables & Performance Benchmarks
+src/mock_workload/matrix_benchmark
+src/mock_workload/matrix_fallback_benchmark
+src/mock_workload/*_benchmark
+
+# Playwright Test Results & Reports
+src/frontend/test-results/
+src/frontend/playwright-report/
+

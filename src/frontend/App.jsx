@@ -124,6 +124,8 @@ export default function App() {
   const [selectedLine, setSelectedLine] = useState(null)
   const [connectionStatus, setConnectionStatus] = useState('local_sim') // 'local_sim' | 'connected' | 'error'
   const [activeTab, setActiveTab] = useState('heatmap') // 'heatmap' | 'assembly' | 'sandbox'
+  const [apiEndpoint, setApiEndpoint] = useState('http://localhost:10000') // Dynamic API Target (Local Envoy vs GKE LoadBalancer)
+  const [queryTaskId, setQueryTaskId] = useState('') // Manual Task UUID lookup field
 
   // Update source content when toggle switches
   const handleToggleCode = (type) => {
@@ -137,21 +139,56 @@ export default function App() {
     }
     setSelectedLine(null)
   }
+ 
+  // Query GKE for a past job's status and load it into the dashboard
+  const handleQueryTask = async (idToQuery) => {
+    const id = idToQuery || queryTaskId
+    if (!id) {
+      alert('Please enter a valid Task UUID first!')
+      return
+    }
+    setConnectionStatus('connecting')
+    try {
+      const res = await fetch(`${apiEndpoint}/api/v1/status/${id.trim()}`)
+      const statusData = await res.json()
+      if (statusData.status === 'completed') {
+        setProfile(statusData.results)
+        setConnectionStatus('connected')
+        alert(`Successfully retrieved and loaded GKE results for task:\n${id}`)
+      } else if (statusData.status === 'failed') {
+        alert(`Task failed on GKE:\n${statusData.error}`)
+        setConnectionStatus('connected')
+      } else if (statusData.status === 'running') {
+        alert(`Task is still actively running in GKE sandbox!\nPlease wait a few seconds and query again.`)
+        setConnectionStatus('connected')
+      } else {
+        alert(`Task not found on GKE. Ensure you have targeted the correct GCP API Gateway address.`)
+        setConnectionStatus('connected')
+      }
+    } catch (err) {
+      console.error(err)
+      alert(`Network error connecting to control plane: ${err.message}`)
+      setConnectionStatus('local_sim')
+    }
+  }
 
-  // Ping backend control plane on mount to verify network connection
+  // Ping backend control plane whenever apiEndpoint changes to verify network connection
   useEffect(() => {
-    fetch('http://localhost:10000/api/v1/health')
+    setConnectionStatus('connecting')
+    fetch(`${apiEndpoint}/api/v1/health`)
       .then(res => res.json())
       .then(data => {
         if (data.status === 'healthy') {
           setConnectionStatus('connected')
+        } else {
+          setConnectionStatus('local_sim')
         }
       })
       .catch(() => {
         // Fallback gracefully to local simulation mode if server is offline
         setConnectionStatus('local_sim')
       })
-  }, [])
+  }, [apiEndpoint])
 
   // Trigger sandboxed cross-compilation on GKE via the FastAPI Control Plane
   const handleTriggerCompilation = async () => {
@@ -160,20 +197,20 @@ export default function App() {
 
     if (connectionStatus === 'connected') {
       try {
-        const response = await fetch('http://localhost:10000/api/v1/optimize', {
+        const response = await fetch(`${apiEndpoint}/api/v1/optimize`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ code })
         })
         const data = await response.json()
         const taskId = data.task_id
-
+ 
         // Poll status of GKE sandbox pod run
         let completed = false
         let pollCount = 0
         while (!completed && pollCount < 30) {
           await new Promise(resolve => setTimeout(resolve, 1500))
-          const statusRes = await fetch(`http://localhost:10000/api/v1/status/${taskId}`)
+          const statusRes = await fetch(`${apiEndpoint}/api/v1/status/${taskId}`)
           const statusData = await statusRes.json()
           
           if (statusData.status === 'completed') {
@@ -216,16 +253,39 @@ export default function App() {
         {/* Network & Sandbox Security Indicators */}
         <div style={styles.indicators}>
           <div style={styles.indicatorItem}>
-            <span style={{...styles.dot, backgroundColor: connectionStatus === 'connected' ? '#10b981' : '#3b82f6'}}></span>
-            <span style={styles.indicatorLabel}>Control Plane: {connectionStatus === 'connected' ? 'GKE CLUSTER' : 'LOCAL SIMULATOR'}</span>
+            <span style={styles.indicatorLabel}>GCP API Gateway:</span>
+            <input 
+              type="text" 
+              value={apiEndpoint} 
+              onChange={(e) => setApiEndpoint(e.target.value)} 
+              placeholder="e.g. http://34.60.133.24:10000"
+              style={{
+                backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                border: '1px solid rgba(255, 255, 255, 0.15)',
+                borderRadius: '6px',
+                color: '#fff',
+                padding: '4px 10px',
+                fontSize: '11px',
+                fontFamily: 'monospace',
+                width: '210px',
+                outline: 'none',
+                transition: 'all 0.2s',
+              }}
+            />
+          </div>
+          <div style={styles.indicatorItem}>
+            <span style={{...styles.dot, backgroundColor: connectionStatus === 'connected' ? '#10b981' : connectionStatus === 'connecting' ? '#f59e0b' : '#3b82f6'}}></span>
+            <span style={styles.indicatorLabel}>
+              Control Plane: {connectionStatus === 'connected' ? 'GKE ACTIVE' : connectionStatus === 'connecting' ? 'CONNECTING...' : 'LOCAL SIMULATION'}
+            </span>
           </div>
           <div style={styles.indicatorItem}>
             <span style={{...styles.dot, backgroundColor: '#10b981'}}></span>
-            <span style={styles.indicatorLabel}>Sandbox: gVisor (runsc)</span>
+            <span style={styles.indicatorLabel}>Sandbox: gVisor</span>
           </div>
           <div style={styles.indicatorItem}>
             <span style={{...styles.dot, backgroundColor: '#10b981'}}></span>
-            <span style={styles.indicatorLabel}>Identity: Tailscale tsnet</span>
+            <span style={styles.indicatorLabel}>Identity: tsnet</span>
           </div>
         </div>
       </header>
@@ -319,25 +379,75 @@ export default function App() {
 
         {/* Right Column: Interactive Heatmap, Assembly & Sandboxing Tabs */}
         <section style={{...styles.card, gridArea: 'heatmap'}} className="glass-card">
-          <div style={styles.tabHeader}>
-            <button 
-              onClick={() => setActiveTab('heatmap')} 
-              style={{...styles.tabBtn, ...(activeTab === 'heatmap' ? styles.tabBtnActive : {})}}
-            >
-              Vectorization Heatmap
-            </button>
-            <button 
-              onClick={() => setActiveTab('assembly')} 
-              style={{...styles.tabBtn, ...(activeTab === 'assembly' ? styles.tabBtnActive : {})}}
-            >
-              Compiler Diagnostics
-            </button>
-            <button 
-              onClick={() => setActiveTab('sandbox')} 
-              style={{...styles.tabBtn, ...(activeTab === 'sandbox' ? styles.tabBtnActive : {})}}
-            >
-              Sandbox Logs
-            </button>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+            paddingBottom: '8px',
+            marginBottom: '16px',
+            flexWrap: 'wrap',
+            gap: '12px'
+          }}>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button 
+                onClick={() => setActiveTab('heatmap')} 
+                style={{...styles.tabBtn, borderBottom: activeTab === 'heatmap' ? '2px solid #10b981' : 'none', paddingBottom: '8px', color: activeTab === 'heatmap' ? '#fff' : '#9ca3af', backgroundColor: 'transparent', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: '500'}}
+              >
+                Vectorization Heatmap
+              </button>
+              <button 
+                onClick={() => setActiveTab('assembly')} 
+                style={{...styles.tabBtn, borderBottom: activeTab === 'assembly' ? '2px solid #10b981' : 'none', paddingBottom: '8px', color: activeTab === 'assembly' ? '#fff' : '#9ca3af', backgroundColor: 'transparent', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: '500'}}
+              >
+                Compiler Diagnostics
+              </button>
+              <button 
+                onClick={() => setActiveTab('sandbox')} 
+                style={{...styles.tabBtn, borderBottom: activeTab === 'sandbox' ? '2px solid #10b981' : 'none', paddingBottom: '8px', color: activeTab === 'sandbox' ? '#fff' : '#9ca3af', backgroundColor: 'transparent', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: '500'}}
+              >
+                Sandbox Logs
+              </button>
+            </div>
+            
+            {/* Job Query Search Widget */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <input 
+                type="text" 
+                placeholder="Inspect Task UUID..." 
+                value={queryTaskId} 
+                onChange={(e) => setQueryTaskId(e.target.value)} 
+                style={{
+                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  borderRadius: '6px',
+                  color: '#fff',
+                  padding: '4px 10px',
+                  fontSize: '11px',
+                  fontFamily: 'monospace',
+                  width: '180px',
+                  outline: 'none',
+                }}
+              />
+              <button 
+                onClick={() => handleQueryTask()}
+                style={{
+                  backgroundColor: '#3b82f6',
+                  border: 'none',
+                  borderRadius: '6px',
+                  color: '#fff',
+                  padding: '4px 12px',
+                  fontSize: '11px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'background-color 0.2s'
+                }}
+                onMouseOver={(e) => e.target.style.backgroundColor = '#2563eb'}
+                onMouseOut={(e) => e.target.style.backgroundColor = '#3b82f6'}
+              >
+                Query GKE
+              </button>
+            </div>
           </div>
 
           <div style={styles.tabContent}>
@@ -531,8 +641,41 @@ matrix.cpp:13:13: remark: unrolled loop by a factor of 2 [loop-unroll]
 
         {/* Bottom Panel: Metrics & Performance Dashboard */}
         <section style={{...styles.card, gridArea: 'metrics'}} className="glass-card">
-          <div style={styles.cardHeader}>
+          <div style={{...styles.cardHeader, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px'}}>
             <h2 style={styles.cardTitle}>Real-Time Hardware & Inference Metrics</h2>
+            {connectionStatus === 'connected' ? (
+              <span style={{
+                backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                color: '#10b981',
+                border: '1px solid rgba(16, 185, 129, 0.3)',
+                padding: '4px 10px',
+                borderRadius: '12px',
+                fontSize: '11px',
+                fontWeight: 'bold',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}>
+                <span style={{width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10b981', display: 'inline-block'}}></span>
+                LIVE FROM GKE CLUSTER
+              </span>
+            ) : (
+              <span style={{
+                backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                color: '#3b82f6',
+                border: '1px solid rgba(59, 130, 246, 0.3)',
+                padding: '4px 10px',
+                borderRadius: '12px',
+                fontSize: '11px',
+                fontWeight: 'bold',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}>
+                <span style={{width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#3b82f6', display: 'inline-block'}}></span>
+                HIGH-FIDELITY SIMULATION MODE
+              </span>
+            )}
           </div>
           
           <div style={styles.metricsGrid}>

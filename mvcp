@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+import sys
+import os
+import json
+import urllib.request
+
+GKE_ENDPOINT = "http://34.60.133.24:10000/api/v1/mcp"
+
+def print_help():
+    print("""
+Arm Cross-Compilation Profiler CLI (mvcp)
+=========================================
+Usage:
+  ./mvcp <file_path>
+
+Arguments:
+  <file_path>       Path to the C++ kernel source file (default: src/mock_workload/matrix.cpp)
+
+Options:
+  -h, --help        Show this help message
+
+Examples:
+  ./mvcp src/mock_workload/matrix.cpp
+    """)
+
+def main():
+    if "-h" in sys.argv or "--help" in sys.argv:
+        print_help()
+        return
+
+    # Determine C++ target file path
+    file_path = "src/mock_workload/matrix.cpp"
+    if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
+        file_path = sys.argv[1]
+
+    if not os.path.exists(file_path):
+        print(f"❌ Error: Source file '{file_path}' does not exist.")
+        print_help()
+        sys.exit(1)
+
+    print(f"📦 [MVCP CLI] Reading kernel source file: {file_path}")
+    try:
+        with open(file_path, "r") as f:
+            code_content = f.read()
+    except Exception as e:
+        print(f"❌ Error reading file: {e}")
+        sys.exit(1)
+
+    print(f"🚀 [MVCP CLI] Deploying kernel payload to GKE Sandbox compiler...")
+    
+    # Pack the payload matching GKE JSON-RPC optimize_kernel schema
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "optimize_kernel",
+            "arguments": {
+                "code": code_content
+            }
+        }
+    }
+
+    req = urllib.request.Request(
+        GKE_ENDPOINT,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+
+    try:
+        with urllib.request.urlopen(req) as response:
+            res_data = response.read().decode("utf-8")
+            res_json = json.loads(res_data)
+            
+            if "error" in res_json:
+                print(f"❌ Compiler Error: {res_json['error']}")
+                sys.exit(1)
+                
+            result = res_json.get("result", {})
+            content_list = result.get("content", [])
+            if not content_list:
+                print("⚠️ Received empty response from GKE compiler.")
+                sys.exit(1)
+                
+            # Concatenate text from all content blocks to ensure we capture all returned pieces
+            full_text_response = ""
+            for block in content_list:
+                full_text_response += block.get("text", "") + "\n"
+            
+            # Parse key performance metrics from the combined response
+            sme2_util = "N/A"
+            latency = "N/A"
+            spills = "N/A"
+            
+            for line in full_text_response.split("\n"):
+                if "SME2 Utilization:" in line:
+                    sme2_util = line.split("SME2 Utilization:")[1].strip()
+                elif "Latency Impact:" in line:
+                    latency = line.split("Latency Impact:")[1].strip()
+                elif "Register Spills:" in line:
+                    spills = line.split("Register Spills:")[1].strip()
+
+            print("\n" + "="*55)
+            print("📊 ARM CROSS-COMPILATION TELEMETRY REPORT")
+            print("="*55)
+            print(f"🟢 Target Hardware:    Cortex-X925 (Armv9-A)")
+            print(f"⚡ SME2 Accelerator:   {sme2_util}")
+            print(f"📉 Latency Impact:     {latency}")
+            print(f"📦 Register Spills:    {spills}")
+            print("="*55)
+            
+            # Extract HTML visualizer code block from the combined response
+            html_block = ""
+            if "```html" in full_text_response:
+                parts = full_text_response.split("```html")
+                if len(parts) > 1:
+                    html_block = parts[1].split("```")[0].strip()
+            
+            if html_block:
+                heatmap_path = "vectorization_heatmap.html"
+                with open(heatmap_path, "w") as out:
+                    out.write(html_block)
+                print(f"💾 [MVCP CLI] Saved interactive visualizer to: {heatmap_path}")
+                print(f"👉 Run 'open {heatmap_path}' to view the vector heatmap in your browser!")
+            else:
+                print("⚠️ Telemetry HTML visualizer block not found in response.")
+                
+            print("="*55 + "\n")
+
+    except Exception as e:
+        print(f"❌ Connection Error: Unable to reach GKE gateway at {GKE_ENDPOINT}.")
+        print(f"Details: {e}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

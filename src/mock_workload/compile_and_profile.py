@@ -1,7 +1,5 @@
 import os
 import json
-import subprocess
-import sys
 
 def run_profiler(source_path: str = "matrix.cpp") -> dict:
     """

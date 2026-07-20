@@ -65,6 +65,7 @@ ZONE=$(read_config_key "zone")
 CLUSTER_NAME=$(read_config_key "cluster_name")
 TS_AUTH_KEY=$(read_config_key "tailscale_auth_key")
 DOCKER_IMAGE=$(read_config_key "docker_image_name")
+BACKEND_IMAGE=$(read_config_key "backend_image_name")
 
 if [[ -z "$PROJECT_ID" || -z "$CLUSTER_NAME" || -z "$TS_AUTH_KEY" ]]; then
     error "Configuration properties inside provision_config.json are invalid or missing."
@@ -210,7 +211,7 @@ info "Creating Tailscale secure cryptographic secret keys..."
 kubectl delete secret tailscale-secret --namespace default 2>/dev/null || true
 kubectl create secret generic tailscale-secret --namespace default --from-literal=TS_AUTHKEY="${TS_AUTH_KEY}"
 
-# 4. Build and Publish the sandbox image
+# 4. Build and Publish the sandbox and backend images
 info "Building mobile compiler-profiler docker image (utilizing offline local cache)..."
 docker build --pull=false -t "${DOCKER_IMAGE}" -f - "${ROOT_DIR}" <<EOF
 FROM ubuntu:22.04
@@ -219,17 +220,36 @@ RUN mkdir -p /opt/android-ndk /opt/kleidiai/include
 COPY src/mock_workload/compile_and_profile.py /opt/compile_and_profile.py
 EOF
 
-info "Configuring docker credentials and publishing image..."
+info "Building control plane backend docker image..."
+docker build -t "${BACKEND_IMAGE}" -f - "${ROOT_DIR}" <<EOF
+FROM python:3.9-slim
+WORKDIR /app
+RUN pip install --no-cache-dir fastapi uvicorn pydantic kubernetes requests
+COPY src/ /app/src/
+COPY config/ /app/config/
+EXPOSE 8000
+CMD ["uvicorn", "src.control_plane.main:app", "--host", "0.0.0.0", "--port", "8000"]
+EOF
+
+info "Configuring docker credentials and publishing images..."
 gcloud auth configure-docker --quiet
 docker push "${DOCKER_IMAGE}"
+docker push "${BACKEND_IMAGE}"
 
 # 5. Deploy Control Plane onto GKE
 info "Publishing Envoy ConfigMap..."
 kubectl delete configmap mvcp-envoy-config 2>/dev/null || true
 kubectl create configmap mvcp-envoy-config --from-file="${ROOT_DIR}/config/envoy.yaml"
 
-info "Applying control plane manifests..."
-kubectl apply -f "${ROOT_DIR}/k8s/deployment.yaml"
+info "Applying control plane manifests dynamically..."
+# Replace image placeholders dynamically with actual config-defined image parameters
+DEPLOY_MANIFEST=$(mktemp)
+sed -e "s|gcr.io/sovereign-ai-495715/control-plane-backend:latest|${BACKEND_IMAGE}|g" \
+    -e "s|gcr.io/sovereign-ai-495715/mobile-ndk-kleidiai:latest|${DOCKER_IMAGE}|g" \
+    "${ROOT_DIR}/k8s/deployment.yaml" > "${DEPLOY_MANIFEST}"
+kubectl apply -f "${DEPLOY_MANIFEST}"
+rm "${DEPLOY_MANIFEST}"
+
 kubectl apply -f "${ROOT_DIR}/k8s/service.yaml"
 
 # 6. Wait for LoadBalancer and run final Cloud Smoke Tests
@@ -251,10 +271,20 @@ fi
 
 success "Control Plane exposed at: http://${LOADBALANCER_IP}:10000"
 
-# Running Smoke tests against public load balancer
-info "Running live smoke tests on cloud endpoint..."
-HEALTH_STATUS=$(curl -s "http://${LOADBALANCER_IP}:10000/api/v1/health" || echo "")
-if [[ "$HEALTH_STATUS" == *'"status":"healthy"'* ]]; then
+# Running Smoke tests against public load balancer with retry polling for GCP routing warm-up
+info "Running live smoke tests on cloud endpoint (polling with retries for GCP routing warm-up)..."
+SMOKE_PASS=false
+for attempt in {1..12}; do
+    HEALTH_STATUS=$(curl -s "http://${LOADBALANCER_IP}:10000/api/v1/health" || echo "")
+    if [[ "$HEALTH_STATUS" == *'"status":"healthy"'* ]]; then
+        SMOKE_PASS=true
+        break
+    fi
+    info "Waiting for public routing to propagate (attempt ${attempt}/12)..."
+    sleep 5
+done
+
+if [[ "$SMOKE_PASS" == "true" ]]; then
     success "GCP Live Smoke Test: PASS"
 else
     error "GCP Live Smoke Test: FAILED. API server unreachable at public endpoint."

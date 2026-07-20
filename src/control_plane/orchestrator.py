@@ -1,5 +1,4 @@
 import os
-import uuid
 import logging
 import asyncio
 from typing import Dict, Any
@@ -17,7 +16,14 @@ except ImportError:
     logger.warning("kubernetes python client not installed. Falling back to mock execution mode.")
 
 class SandboxOrchestrator:
+    """Orchestrates secure compiler sandboxing and profiling on GKE.
+
+    Manages the lifecycle of transient compiler environments sandboxed using
+    gVisor (runsc) on Arm-based Tau T2A nodes. Supports fallback high-fidelity
+    simulation for local evaluation.
+    """
     def __init__(self):
+        self.sandbox_image = os.environ.get("SANDBOX_IMAGE", "gcr.io/mvcp-platform/mobile-ndk-kleidiai:latest")
         self.k8s_client_configured = False
         if K8S_AVAILABLE:
             try:
@@ -34,9 +40,23 @@ class SandboxOrchestrator:
                 logger.warning(f"Failed to load Kubernetes configuration: {e}. Orchestrator will run in simulation mode.")
 
     async def optimize_and_profile(self, task_id: str, cxx_code: str) -> Dict[str, Any]:
-        """
-        Orchestrates the sandbox environment by spinning up a transient Pod on GKE
-        with gVisor runtimeClass and secure Tailscale network identity.
+        """Orchestrates the sandbox environment by spinning up a transient Pod on GKE.
+
+        Spins up a Pod running inside a secure gVisor container, schedules it
+        onto Arm64 architectures, compiles and profiles the kernel, and pulls
+        performance stream logs.
+
+        Args:
+            task_id: Unique task identifier.
+            cxx_code: The C++ kernel code to compile and profile.
+
+        Returns:
+            A dictionary containing compilation status, hardware utilization metrics,
+            and line-by-line optimization analysis.
+
+        Raises:
+            RuntimeError: If GKE sandbox execution fails.
+            TimeoutError: If sandbox execution times out.
         """
         logger.info(f"Initiating optimization task {task_id}")
 
@@ -67,7 +87,7 @@ class SandboxOrchestrator:
                 "containers": [
                     {
                         "name": "compiler-sandbox",
-                        "image": "gcr.io/mvcp-platform/mobile-ndk-kleidiai:latest",
+                        "image": self.sandbox_image,
                         "command": [
                             "python3",
                             "-c",
@@ -142,10 +162,17 @@ class SandboxOrchestrator:
             return await self._run_simulated_optimization(task_id, cxx_code)
 
     def _generate_sandbox_bootstrap_command(self, cxx_code: str) -> str:
-        """
-        Generates Python script that writes matrix.cpp inside sandbox container,
-        runs compile_and_profile.py, and prints the performance JSON to stdout
-        to mimic secure streaming over tsnet interface.
+        """Generates a Python script that runs matrix.cpp inside the sandbox.
+
+        Writes matrix.cpp, runs compile_and_profile.py, and prints the 
+        resulting performance JSON payload to standard output, simulating 
+        safe socket streaming.
+
+        Args:
+            cxx_code: The C++ source code to write.
+
+        Returns:
+            A string containing the Python bootstrap command script.
         """
         escaped_code = cxx_code.replace("\\", "\\\\").replace("'", "\\'")
         
@@ -176,8 +203,16 @@ print("===TSNET_STREAM_END===")
 """
 
     def _parse_profile_from_logs(self, logs: str, task_id: str) -> Dict[str, Any]:
-        """
-        Parses logs to retrieve securely streamed JSON metrics.
+        """Parses Pod standard output logs to extract performance JSON.
+
+        Extracts JSON between streaming marker lines and formats the results dictionary.
+
+        Args:
+            logs: The raw logs containing the streaming delimiters.
+            task_id: Unique task identifier.
+
+        Returns:
+            A dictionary containing the parsed performance profile.
         """
         import json
         try:
@@ -200,9 +235,18 @@ print("===TSNET_STREAM_END===")
         }
 
     async def _run_simulated_optimization(self, task_id: str, cxx_code: str) -> Dict[str, Any]:
-        """
-        A high-fidelity simulation of the optimization loop. Runs when Kubernetes
-        is not accessible, guaranteeing the platform works end-to-end for local evaluation.
+        """Runs a high-fidelity simulation of the optimization loop.
+
+        Guarantees that the entire control plane performs and responds 
+        perfectly during local evaluations when a connection to a GKE 
+        cluster is not established.
+
+        Args:
+            task_id: Unique task identifier.
+            cxx_code: The C++ source code to analyze.
+
+        Returns:
+            A dictionary containing simulated compiler diagnostics and performance profiles.
         """
         logger.info(f"Running simulation mode for task {task_id}")
         await asyncio.sleep(1.5)  # Simulate compiling latency

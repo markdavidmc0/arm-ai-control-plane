@@ -14,11 +14,25 @@ spec:
       labels:
         app: mvcp-control-plane
     spec:
+      # Enable sandboxed execution within gVisor on Arm64 Tau T2A nodes
+      runtimeClassName: gvisor
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      tolerations:
+      - key: "sandbox.gke.io/runtime"
+        operator: "Equal"
+        value: "gvisor"
+        effect: "NoSchedule"
+      - key: "kubernetes.io/arch"
+        operator: "Equal"
+        value: "arm64"
+        effect: "NoSchedule"
+      
       containers:
       # Container 1: FastAPI Control Plane Backend
       - name: control-plane
-        image: gcr.io/mvcp-platform/control-plane-backend:latest
-        imagePullPolicy: IfNotPresent
+        image: gcr.io/sovereign-ai-495715/control-plane-backend:latest
+        imagePullPolicy: Always
         command: ["uvicorn", "src.control_plane.main:app", "--host", "0.0.0.0", "--port", "8000"]
         ports:
         - containerPort: 8000
@@ -34,6 +48,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        - name: SANDBOX_IMAGE
+          value: gcr.io/sovereign-ai-495715/mobile-ndk-kleidiai:latest
         resources:
           requests:
             cpu: "500m"
