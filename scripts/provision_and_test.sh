@@ -75,9 +75,17 @@ fi
 if [[ "$MODE" == "dry-run" ]]; then
     info "Initiating high-fidelity local control-plane dry-run smoke tests..."
     
+    # Define Python interpreter to use (use the .venv interpreter if available)
+    PYTHON_CMD="python3"
+    if [[ -f "${ROOT_DIR}/.venv/bin/python3" ]]; then
+        PYTHON_CMD="${ROOT_DIR}/.venv/bin/python3"
+    elif command -v uv &>/dev/null; then
+        PYTHON_CMD="uv run python3"
+    fi
+
     # Assert FastAPI, uvicorn and requests are installed
     check_dependency "python3"
-    python3 -c "import fastapi, uvicorn, requests" &>/dev/null || {
+    ${PYTHON_CMD} -c "import fastapi, uvicorn, requests" &>/dev/null || {
         warn "Required python packages (fastapi, uvicorn, requests) not found in system environment."
         info "Installing dependencies inside user space..."
         pip3 install fastapi uvicorn requests --user
@@ -96,7 +104,7 @@ if [[ "$MODE" == "dry-run" ]]; then
 
     # Start FastAPI control plane in the background
     info "Spinning up local FastAPI Control Plane on Port 8000..."
-    PYTHONPATH="${ROOT_DIR}" python3 "${ROOT_DIR}/src/control_plane/main.py" &
+    PYTHONPATH="${ROOT_DIR}" ${PYTHON_CMD} "${ROOT_DIR}/src/control_plane/main.py" &
     SERVER_PID=$!
     
     # Setup exit trap to clean up the backend process when the script finishes
@@ -130,7 +138,7 @@ if [[ "$MODE" == "dry-run" ]]; then
     # 2. Trigger Naive Optimize job
     info "Smoke Test 2: Triggering optimization compiler pipeline (Naive Stride code)..."
     RESPONSE=$(curl -s -X POST -H "Content-Type: application/json" -d '{"code": "void naive_multiply() { for(int k=0; k<128; k++) { C[i][j] += A[i][k]; } }"}' http://localhost:8000/api/v1/optimize)
-    TASK_ID=$(echo "$RESPONSE" | python3 -c "import sys, json; print(json.load(sys.stdin)['task_id'])")
+    TASK_ID=$(echo "$RESPONSE" | "${PYTHON_CMD}" -c "import sys, json; print(json.load(sys.stdin)['task_id'])")
     info "Task ID created: ${TASK_ID}"
 
     # 3. Poll task status until complete
@@ -139,7 +147,7 @@ if [[ "$MODE" == "dry-run" ]]; then
     for i in {1..5}; do
         sleep 1
         TASK_RES=$(curl -s "http://localhost:8000/api/v1/status/${TASK_ID}")
-        STATUS=$(echo "$TASK_RES" | python3 -c "import sys, json; print(json.load(sys.stdin)['status'])")
+        STATUS=$(echo "$TASK_RES" | "${PYTHON_CMD}" -c "import sys, json; print(json.load(sys.stdin)['status'])")
         info "Current state: ${STATUS}"
         if [[ "$STATUS" == "completed" ]]; then
             break

@@ -34,6 +34,10 @@ app.add_middleware(
 orchestrator = SandboxOrchestrator()
 mcp_server = MCPServer(orchestrator=orchestrator)
 
+# Mount the FastMCP Streamable HTTP / SSE Sub-Application
+from src.control_plane.mcp_server import mcp
+app.mount("/mcp", mcp.http_app())
+
 # In-Memory Database for tracking tasks
 tasks_db: Dict[str, Dict[str, Any]] = {}
 
