@@ -27,17 +27,36 @@ static_resources:
                   protocol: "%PROTOCOL%"
                   response_code: "%RESPONSE_CODE%"
                   response_flags: "%RESPONSE_FLAGS%"
-                  bytes_received: "%BYTES_RECEIVED%"
-                  bytes_sent: "%BYTES_SENT%"
                   duration_ms: "%DURATION%"
-                  upstream_service_time_ms: "%RESP(X-ENVOY-UPSTREAM-SERVICE-TIME)%"
                   upstream_cluster: "%UPSTREAM_CLUSTER%"
                   user_agent: "%REQ(USER-AGENT)%"
                   trace_id: "%REQ(X-REQUEST-ID)%"
-                  ai_gateway_metadata:
-                    mcp_routing: "true"
-                    federated_identity: "%REQ(X-TAILSCALE-CLIENT-IDENTITY)%"
+                  auth_status: "%RESP(X-ENVOY-AUTH-STATUS)%"
+                  workspace_context: "%REQ(X-WORKSPACE-CONTEXT)%"
+                  auth_redacted: "[REDACTED_OTEL_SIEM_COMPLIANT]"
           http_filters:
+          - name: envoy.filters.http.ext_authz
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+              http_service:
+                server_uri:
+                  cluster: fastapi_backend
+                  timeout: 2.0s
+                  uri: http://127.0.0.1:8000/api/v1/internal/auth-check
+                authorization_request:
+                  allowed_headers:
+                    patterns:
+                    - exact: x-judge-api-key
+                    - exact: authorization
+                    - exact: x-workspace-context
+                    - exact: content-type
+                authorization_response:
+                  allowed_upstream_headers:
+                    patterns:
+                    - exact: x-user-id
+                    - exact: x-user-role
+                    - exact: x-user-scopes
+              failure_mode_allow: false
           - name: envoy.filters.http.router
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router

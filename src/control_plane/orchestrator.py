@@ -1,7 +1,7 @@
-import os
-import logging
 import asyncio
-from typing import Dict, Any
+import logging
+import os
+from typing import Any
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -10,10 +10,12 @@ logger = logging.getLogger("mvcp.orchestrator")
 try:
     from kubernetes import client, config
     from kubernetes.client.rest import ApiException
+
     K8S_AVAILABLE = True
 except ImportError:
     K8S_AVAILABLE = False
     logger.warning("kubernetes python client not installed. Falling back to mock execution mode.")
+
 
 class SandboxOrchestrator:
     """Orchestrates secure compiler sandboxing and profiling on GKE.
@@ -22,8 +24,11 @@ class SandboxOrchestrator:
     gVisor (runsc) on Arm-based Tau T2A nodes. Supports fallback high-fidelity
     simulation for local evaluation.
     """
+
     def __init__(self):
-        self.sandbox_image = os.environ.get("SANDBOX_IMAGE", "gcr.io/mvcp-platform/mobile-ndk-kleidiai:latest")
+        self.sandbox_image = os.environ.get(
+            "SANDBOX_IMAGE", "gcr.io/mvcp-platform/mobile-ndk-kleidiai:latest"
+        )
         self.k8s_client_configured = False
         if K8S_AVAILABLE:
             try:
@@ -37,9 +42,11 @@ class SandboxOrchestrator:
                     self.k8s_client_configured = True
                     logger.info("Loaded local kubeconfig file.")
             except Exception as e:
-                logger.warning(f"Failed to load Kubernetes configuration: {e}. Orchestrator will run in simulation mode.")
+                logger.warning(
+                    f"Failed to load Kubernetes configuration: {e}. Orchestrator will run in simulation mode."
+                )
 
-    async def optimize_and_profile(self, task_id: str, cxx_code: str) -> Dict[str, Any]:
+    async def optimize_and_profile(self, task_id: str, cxx_code: str) -> dict[str, Any]:
         """Orchestrates the sandbox environment by spinning up a transient Pod on GKE.
 
         Spins up a Pod running inside a secure gVisor container, schedules it
@@ -73,16 +80,13 @@ class SandboxOrchestrator:
             "kind": "Pod",
             "metadata": {
                 "name": pod_name,
-                "labels": {
-                    "mvcp.ai/task-id": task_id,
-                    "mvcp.ai/sandbox-type": "gvisor-arm"
-                }
+                "labels": {"mvcp.ai/task-id": task_id, "mvcp.ai/sandbox-type": "gvisor-arm"},
             },
             "spec": {
-                "runtimeClassName": "gvisor", # Forces sandboxing via gVisor (runsc)
+                "runtimeClassName": "gvisor",  # Forces sandboxing via gVisor (runsc)
                 "restartPolicy": "Never",
                 "nodeSelector": {
-                    "kubernetes.io/arch": "arm64" # Schedule strictly on Arm-based Tau T2A Nodes
+                    "kubernetes.io/arch": "arm64"  # Schedule strictly on Arm-based Tau T2A Nodes
                 },
                 "containers": [
                     {
@@ -91,7 +95,7 @@ class SandboxOrchestrator:
                         "command": [
                             "python3",
                             "-c",
-                            self._generate_sandbox_bootstrap_command(cxx_code)
+                            self._generate_sandbox_bootstrap_command(cxx_code),
                         ],
                         "env": [
                             {
@@ -99,28 +103,19 @@ class SandboxOrchestrator:
                                 "value_from": {
                                     "secretKeyRef": {
                                         "name": "tailscale-secret",
-                                        "key": "TS_AUTHKEY"
+                                        "key": "TS_AUTHKEY",
                                     }
-                                }
+                                },
                             },
-                            {
-                                "name": "TASK_ID",
-                                "value": task_id
-                            }
+                            {"name": "TASK_ID", "value": task_id},
                         ],
                         "resources": {
-                            "limits": {
-                                "cpu": "2",
-                                "memory": "2Gi"
-                            },
-                            "requests": {
-                                "cpu": "1",
-                                "memory": "1Gi"
-                            }
-                        }
+                            "limits": {"cpu": "2", "memory": "2Gi"},
+                            "requests": {"cpu": "1", "memory": "1Gi"},
+                        },
                     }
-                ]
-            }
+                ],
+            },
         }
 
         try:
@@ -139,17 +134,17 @@ class SandboxOrchestrator:
                     # Retrieve the securely streamed profile data printed to standard output (simulating output streaming via tsnet)
                     logs = v1.read_namespaced_pod_log(name=pod_name, namespace=namespace)
                     logger.info(f"Pod {pod_name} finished. Retrieving profile details.")
-                    
+
                     # Clean up the pod
                     v1.delete_namespaced_pod(name=pod_name, namespace=namespace)
                     return self._parse_profile_from_logs(logs, task_id)
-                    
+
                 elif phase == "Failed":
                     logs = v1.read_namespaced_pod_log(name=pod_name, namespace=namespace)
                     logger.error(f"Sandbox Pod execution failed: {logs}")
                     v1.delete_namespaced_pod(name=pod_name, namespace=namespace)
                     raise RuntimeError(f"GKE Sandbox execution failed: {logs}")
-                
+
                 await asyncio.sleep(5)
                 elapsed += 5
 
@@ -164,8 +159,8 @@ class SandboxOrchestrator:
     def _generate_sandbox_bootstrap_command(self, cxx_code: str) -> str:
         """Generates a Python script that runs matrix.cpp inside the sandbox.
 
-        Writes matrix.cpp, runs compile_and_profile.py, and prints the 
-        resulting performance JSON payload to standard output, simulating 
+        Writes matrix.cpp, runs compile_and_profile.py, and prints the
+        resulting performance JSON payload to standard output, simulating
         safe socket streaming.
 
         Args:
@@ -175,7 +170,7 @@ class SandboxOrchestrator:
             A string containing the Python bootstrap command script.
         """
         escaped_code = cxx_code.replace("\\", "\\\\").replace("'", "\\'")
-        
+
         return f"""
 import json
 import os
@@ -202,7 +197,7 @@ print(json.dumps(profile))
 print("===TSNET_STREAM_END===")
 """
 
-    def _parse_profile_from_logs(self, logs: str, task_id: str) -> Dict[str, Any]:
+    def _parse_profile_from_logs(self, logs: str, task_id: str) -> dict[str, Any]:
         """Parses Pod standard output logs to extract performance JSON.
 
         Extracts JSON between streaming marker lines and formats the results dictionary.
@@ -215,6 +210,7 @@ print("===TSNET_STREAM_END===")
             A dictionary containing the parsed performance profile.
         """
         import json
+
         try:
             start_marker = "===TSNET_STREAM_START==="
             end_marker = "===TSNET_STREAM_END==="
@@ -227,18 +223,18 @@ print("===TSNET_STREAM_END===")
                 return profile
         except Exception as e:
             logger.error(f"Failed to parse performance stream logs: {e}")
-        
+
         return {
             "task_id": task_id,
             "status": "error",
-            "message": "Stream corruption over secure network layer."
+            "message": "Stream corruption over secure network layer.",
         }
 
-    async def _run_simulated_optimization(self, task_id: str, cxx_code: str) -> Dict[str, Any]:
+    async def _run_simulated_optimization(self, task_id: str, cxx_code: str) -> dict[str, Any]:
         """Runs a high-fidelity simulation of the optimization loop.
 
-        Guarantees that the entire control plane performs and responds 
-        perfectly during local evaluations when a connection to a GKE 
+        Guarantees that the entire control plane performs and responds
+        perfectly during local evaluations when a connection to a GKE
         cluster is not established.
 
         Args:
@@ -256,7 +252,11 @@ print("===TSNET_STREAM_END===")
         optimized_microkernel_lines = []
         is_optimized = False
 
-        if "kleidi" in cxx_code.lower() or "neon_micro_kernel" in cxx_code.lower() or "sme" in cxx_code.lower():
+        if (
+            "kleidi" in cxx_code.lower()
+            or "neon_micro_kernel" in cxx_code.lower()
+            or "sme" in cxx_code.lower()
+        ):
             is_optimized = True
 
         # Map lines from the matrix.cpp file (standard 1-indexed)
@@ -271,7 +271,7 @@ print("===TSNET_STREAM_END===")
             ttft_reduction = "78% TTFT Latency Reduction (24ms down to 5.2ms)"
             runtime_lbl = "ExecuTorch + Arm KleidiAI Micro-kernels"
         else:
-            missed_vectorization_lines = [16, 17, 18, 19, 20, 21, 22] # Naive scalar bottleneck
+            missed_vectorization_lines = [16, 17, 18, 19, 20, 21, 22]  # Naive scalar bottleneck
             sme2_util = 0.0
             peak_ram = 320
             util_ext = 0.0
@@ -295,8 +295,8 @@ print("===TSNET_STREAM_END===")
                 "scalar_fallback_loops": 0 if is_optimized else 1,
                 "register_spills": 0 if is_optimized else 4,
                 "neon_instructions": 128 if is_optimized else 0,
-                "sme2_registers_active": 4 if is_optimized else 0
+                "sme2_registers_active": 4 if is_optimized else 0,
             },
             "sandbox_security": "gvisor (simulation-active)",
-            "network_cryptography": "tsnet (virtual-node)"
+            "network_cryptography": "tsnet (virtual-node)",
         }

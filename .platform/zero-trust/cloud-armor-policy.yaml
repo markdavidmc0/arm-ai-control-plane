@@ -1,0 +1,47 @@
+# GCP Cloud Armor Security Policy for Arm Federated AI Control Plane
+apiVersion: compute.cnrm.cloud.google.com/v1beta1
+kind: ComputeSecurityPolicy
+metadata:
+  name: mvcp-control-plane-cloud-armor-policy
+  namespace: arm-control-plane
+spec:
+  description: "Enterprise WAF, DDoS, and IP rate limiting policy for Arm MVCP Gateway"
+  rules:
+  # Rule 100: Enforce rate limiting on API endpoints (max 300 req/min per IP)
+  - action: "rate_based_ban"
+    priority: 100
+    description: "Rate limit incoming requests to 300 req/min per downstream IP"
+    match:
+      versionedExpr: "SRC_IPS_V1"
+      config:
+        srcIpRanges:
+        - "*"
+    rateLimitOptions:
+      rateLimitThreshold:
+        count: 300
+        intervalSec: 60
+      conformAction: "allow"
+      exceedAction: "deny(429)"
+      enforceOnKey: "IP"
+      banThreshold:
+        count: 600
+        intervalSec: 60
+      banDurationSec: 300
+
+  # Rule 200: Block SQLi, XSS, and LFI attacks using OWASP ModSecurity Core Rule Set
+  - action: "deny(403)"
+    priority: 200
+    description: "OWASP Top 10 WAF protection ruleset"
+    match:
+      expr:
+        expression: "evaluatePreconfiguredWaf('sqli-v33-stable', {'sensitivity': 1}) || evaluatePreconfiguredWaf('xss-v33-stable', {'sensitivity': 1})"
+
+  # Rule 1000: Default allow for authenticated internal traffic
+  - action: "allow"
+    priority: 2147483647
+    description: "Default catch-all allow rule"
+    match:
+      versionedExpr: "SRC_IPS_V1"
+      config:
+        srcIpRanges:
+        - "*"

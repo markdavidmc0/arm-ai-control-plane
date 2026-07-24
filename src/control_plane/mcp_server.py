@@ -1,6 +1,7 @@
 import json
 import logging
-from typing import Dict, Any
+from typing import Any
+
 from fastmcp import FastMCP
 
 logger = logging.getLogger("mvcp.mcp_server")
@@ -8,11 +9,10 @@ logger = logging.getLogger("mvcp.mcp_server")
 # Initialize global FastMCP server instance
 mcp = FastMCP("arm-mvcp-gateway")
 
+
 @mcp.tool()
 async def profile_and_optimize_kernel(
-    source_code: str,
-    target_arch: str = "armv9-a",
-    optimization_tier: str = "kleidiai_and_neon"
+    source_code: str, target_arch: str = "armv9-a", optimization_tier: str = "kleidiai_and_neon"
 ) -> str:
     """Cross-compiles and benchmarks C++ matrix kernels in a remote gVisor sandbox on Arm Tau T2A.
 
@@ -24,16 +24,22 @@ async def profile_and_optimize_kernel(
         optimization_tier: The optimization target (e.g. kleidiai_and_neon).
     """
     import uuid
+
     task_id = str(uuid.uuid4())
-    
+
     # Run the orchestrator compilation & profiling
     from src.control_plane.orchestrator import SandboxOrchestrator
+
     orchestrator = SandboxOrchestrator()
     profile_results = await orchestrator.optimize_and_profile(task_id, source_code)
-    
+
     # Inspect compiled results to decide if Neon SIMD is already present
-    has_optimizations = "kleidi" in source_code.lower() or "neon_micro_kernel" in source_code.lower() or "sme" in source_code.lower()
-    
+    has_optimizations = (
+        "kleidi" in source_code.lower()
+        or "neon_micro_kernel" in source_code.lower()
+        or "sme" in source_code.lower()
+    )
+
     # Formatting high-fidelity Markdown table with baseline challenge benchmarks
     report = (
         "### ⚡ Arm Silicon Optimization Results (GCP Tau T2A / gVisor Sandbox)\n\n"
@@ -43,7 +49,7 @@ async def profile_and_optimize_kernel(
         "| **Arm KleidiAI Mode** | 0.65 ms | 2.8x | SME2 Micro-kernel | 0 Spills |\n"
         "| **Hand-Vectorized Neon Mode** | **0.41 ms** 🚀 | **4.5x** | Hand-optimized SIMD | **0 Spills** |\n\n"
     )
-    
+
     if has_optimizations:
         report += (
             "#### 🎉 Optimization Status: SUCCESS\n"
@@ -65,14 +71,16 @@ async def profile_and_optimize_kernel(
             "+}\n"
             "```\n"
         )
-        
+
     return report
+
 
 @mcp.resource("mvcp://heatmap/latest")
 def get_heatmap_data() -> str:
     """Returns the latest structured JSON matrix mapping line-by-line compiler auto-vectorization diagnostics."""
     import json
     import uuid
+
     profile = {
         "task_id": str(uuid.uuid4()),
         "target_hardware": "Cortex-X925 (Armv9-A Mobile CPU)",
@@ -82,20 +90,22 @@ def get_heatmap_data() -> str:
         "vector_extension_utilization_pct": 0.0,
         "latency_ttft_impact": "0% Latency Improvement (Scalar Loop Bottleneck)",
         "missed_vectorization_lines": [17, 18],
-        "optimized_microkernel_lines": [48, 52]
+        "optimized_microkernel_lines": [48, 52],
     }
     server = MCPServer()
     heatmap_data = server.translate_profile_to_heatmap(profile)
     return json.dumps(heatmap_data)
 
+
 class MCPServer:
     """Model Context Protocol (MCP) server implementation.
 
-    Translates raw JSON profile logs from the GKE sandbox into structured UI 
+    Translates raw JSON profile logs from the GKE sandbox into structured UI
     visualization schemas, following the official MCP JSON-RPC 2.0 standard protocol.
-    Fully supports the next-generation MCP Apps specification for rendering sandboxed 
+    Fully supports the next-generation MCP Apps specification for rendering sandboxed
     HTML/CSS/JS widgets directly in the chat panel.
     """
+
     def __init__(self, orchestrator=None):
         """Initializes the MCP Server.
 
@@ -104,7 +114,7 @@ class MCPServer:
         """
         self.orchestrator = orchestrator
 
-    def handle_mcp_request(self, request_body: Dict[str, Any]) -> Dict[str, Any]:
+    def handle_mcp_request(self, request_body: dict[str, Any]) -> dict[str, Any]:
         """Processes standard MCP JSON-RPC 2.0 request payloads.
 
         Supports key MCP protocol methods including tools/list, tools/call,
@@ -126,17 +136,14 @@ class MCPServer:
         try:
             if method == "initialize":
                 # Standard Model Context Protocol initialization response
-                return self._build_jsonrpc_response(req_id, {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {
-                        "tools": {},
-                        "resources": {}
+                return self._build_jsonrpc_response(
+                    req_id,
+                    {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {"tools": {}, "resources": {}},
+                        "serverInfo": {"name": "mvcp-gke-gateway", "version": "1.0.0"},
                     },
-                    "serverInfo": {
-                        "name": "mvcp-gke-gateway",
-                        "version": "1.0.0"
-                    }
-                })
+                )
             elif method == "notifications/initialized":
                 # Standard client initialized acknowledgement notification
                 return self._build_jsonrpc_response(req_id, {})
@@ -154,7 +161,7 @@ class MCPServer:
             logger.error(f"Error handling MCP request: {e}")
             return self._build_jsonrpc_error(req_id, -32603, f"Internal error: {str(e)}")
 
-    def translate_profile_to_heatmap(self, profile: Dict[str, Any]) -> Dict[str, Any]:
+    def translate_profile_to_heatmap(self, profile: dict[str, Any]) -> dict[str, Any]:
         """Translates raw profiling outputs into structured visual widget payloads.
 
         Generates metadata mapping source line numbers to vectorization status
@@ -169,9 +176,9 @@ class MCPServer:
         """
         missed = profile.get("missed_vectorization_lines", [])
         optimized = profile.get("optimized_microkernel_lines", [])
-        
+
         heatmap_data = []
-        
+
         # We define ranges of interest in the matrix.cpp file (lines 1 to 45)
         for line in range(1, 46):
             if line in missed:
@@ -182,21 +189,25 @@ class MCPServer:
             elif line in optimized:
                 status = "kleidiai_optimized"
                 color = "green"
-                description = "Arm KleidiAI Micro-kernel deployed. Native SME2/Neon instructions active."
+                description = (
+                    "Arm KleidiAI Micro-kernel deployed. Native SME2/Neon instructions active."
+                )
                 severity = "OPTIMIZED"
             else:
                 status = "normal"
                 color = "neutral"
                 description = "Boilerplate setup or variable declaration."
                 severity = "NONE"
-                
-            heatmap_data.append({
-                "line": line,
-                "status": status,
-                "color": color,
-                "description": description,
-                "severity": severity
-            })
+
+            heatmap_data.append(
+                {
+                    "line": line,
+                    "status": status,
+                    "color": color,
+                    "description": description,
+                    "severity": severity,
+                }
+            )
 
         return {
             "task_id": profile.get("task_id"),
@@ -206,19 +217,22 @@ class MCPServer:
             "peak_ram_mb": profile.get("peak_ram_mb"),
             "vector_extension_utilization_pct": profile.get("vector_extension_utilization_pct"),
             "latency_ttft_impact": profile.get("latency_ttft_impact"),
-            "assembly_insights": profile.get("assembly_insights", {
-                "vectorized_loops": 0,
-                "scalar_fallback_loops": 1,
-                "register_spills": 4,
-                "neon_instructions": 0,
-                "sme2_registers_active": 0
-            }),
+            "assembly_insights": profile.get(
+                "assembly_insights",
+                {
+                    "vectorized_loops": 0,
+                    "scalar_fallback_loops": 1,
+                    "register_spills": 4,
+                    "neon_instructions": 0,
+                    "sme2_registers_active": 0,
+                },
+            ),
             "heatmap": heatmap_data,
             "sandbox_security_mode": profile.get("sandbox_security", "gvisor"),
-            "network_crypto_layer": profile.get("network_cryptography", "tsnet")
+            "network_crypto_layer": profile.get("network_cryptography", "tsnet"),
         }
 
-    def _list_tools(self) -> Dict[str, Any]:
+    def _list_tools(self) -> dict[str, Any]:
         """Exposes available tools provided by this MCP Server, compliant with MCP Apps.
 
         Returns:
@@ -235,21 +249,17 @@ class MCPServer:
                         "properties": {
                             "code": {
                                 "type": "string",
-                                "description": "The complete C++ matrix multiplication kernel code to be optimized."
+                                "description": "The complete C++ matrix multiplication kernel code to be optimized.",
                             }
                         },
-                        "required": ["code"]
+                        "required": ["code"],
                     },
-                    "_meta": {
-                        "ui": {
-                            "resourceUri": "ui://heatmap"
-                        }
-                    }
+                    "_meta": {"ui": {"resourceUri": "ui://heatmap"}},
                 }
             ]
         }
 
-    def _call_tool(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    def _call_tool(self, params: dict[str, Any]) -> dict[str, Any]:
         """Executes a requested tool call, dynamically compiling an interactive HTML visualizer on-the-fly.
 
         Args:
@@ -268,15 +278,23 @@ class MCPServer:
             code = arguments.get("code")
             if not code:
                 raise ValueError("Missing 'code' argument in optimize_kernel tool call.")
-            
+
             # 1. Analyze code and dynamically compile HTML list items for the visualizer
             code_lines_html = ""
             has_optimizations = "float32x4_t" in code or "vmlaq_f32" in code
-            
+
             for idx, line_text in enumerate(code.splitlines(), start=1):
-                is_green = "float32x4_t" in line_text or "vmlaq_f32" in line_text or "vld1q_f32" in line_text
-                is_amber = ("C[" in line_text or "A[" in line_text or "B[" in line_text) and not is_green and not has_optimizations
-                
+                is_green = (
+                    "float32x4_t" in line_text
+                    or "vmlaq_f32" in line_text
+                    or "vld1q_f32" in line_text
+                )
+                is_amber = (
+                    ("C[" in line_text or "A[" in line_text or "B[" in line_text)
+                    and not is_green
+                    and not has_optimizations
+                )
+
                 if is_green:
                     line_class = "code-line line-green"
                     line_type = "green"
@@ -286,9 +304,11 @@ class MCPServer:
                 else:
                     line_class = "code-line"
                     line_type = "neutral"
-                
+
                 # Escape HTML tags
-                escaped_text = line_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                escaped_text = (
+                    line_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                )
                 code_lines_html += f'                <div class="{line_class}" onclick="inspectLine({idx}, \'{line_type}\')"><span class="line-num">{idx}</span><span class="line-text">{escaped_text}</span></div>\n'
 
             # 2. Package dynamic profiling statistics
@@ -603,20 +623,14 @@ class MCPServer:
 
             return {
                 "content": [
-                    {
-                        "type": "text",
-                        "text": instruction_text
-                    },
-                    {
-                        "type": "text",
-                        "text": f"```html\n{dynamic_html}\n```"
-                    }
+                    {"type": "text", "text": instruction_text},
+                    {"type": "text", "text": f"```html\n{dynamic_html}\n```"},
                 ]
             }
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
 
-    def _list_resources(self) -> Dict[str, Any]:
+    def _list_resources(self) -> dict[str, Any]:
         """Declares all dynamic resources.
 
         Note:
@@ -632,12 +646,12 @@ class MCPServer:
                     "uri": "mvcp://heatmap/latest",
                     "name": "Assembly Line Vectorization Heatmap Data",
                     "mimeType": "application/json",
-                    "description": "JSON matrix mapping line-by-line compiler auto-vectorization diagnostics."
+                    "description": "JSON matrix mapping line-by-line compiler auto-vectorization diagnostics.",
                 }
             ]
         }
 
-    def _read_resource(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    def _read_resource(self, params: dict[str, Any]) -> dict[str, Any]:
         """Retrieves and packages dynamic resources, compiling the interactive HTML App on-the-fly.
 
         Args:
@@ -653,6 +667,7 @@ class MCPServer:
         if uri == "mvcp://heatmap/latest":
             # Return structured JSON payload for analytical and test client assertions
             import uuid
+
             profile = {
                 "task_id": str(uuid.uuid4()),
                 "target_hardware": "Cortex-X925 (Armv9-A Mobile CPU)",
@@ -662,16 +677,12 @@ class MCPServer:
                 "vector_extension_utilization_pct": 0.0,
                 "latency_ttft_impact": "0% Latency Improvement (Scalar Loop Bottleneck)",
                 "missed_vectorization_lines": [17, 18],
-                "optimized_microkernel_lines": [48, 52]
+                "optimized_microkernel_lines": [48, 52],
             }
             heatmap_data = self.translate_profile_to_heatmap(profile)
             return {
                 "contents": [
-                    {
-                        "uri": uri,
-                        "mimeType": "application/json",
-                        "text": json.dumps(heatmap_data)
-                    }
+                    {"uri": uri, "mimeType": "application/json", "text": json.dumps(heatmap_data)}
                 ]
             }
         elif uri == "ui://heatmap":
@@ -956,19 +967,11 @@ class MCPServer:
 </body>
 </html>
 """
-            return {
-                "contents": [
-                    {
-                        "uri": uri,
-                        "mimeType": "text/html",
-                        "text": html_content
-                    }
-                ]
-            }
+            return {"contents": [{"uri": uri, "mimeType": "text/html", "text": html_content}]}
         else:
             raise ValueError(f"Resource not found: {uri}")
 
-    def _build_jsonrpc_response(self, req_id: Any, result: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_jsonrpc_response(self, req_id: Any, result: dict[str, Any]) -> dict[str, Any]:
         """Constructs a standard JSON-RPC 2.0 success frame.
 
         Args:
@@ -978,13 +981,9 @@ class MCPServer:
         Returns:
             A JSON-RPC 2.0 success response dictionary.
         """
-        return {
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "result": result
-        }
+        return {"jsonrpc": "2.0", "id": req_id, "result": result}
 
-    def _build_jsonrpc_error(self, req_id: Any, code: int, message: str) -> Dict[str, Any]:
+    def _build_jsonrpc_error(self, req_id: Any, code: int, message: str) -> dict[str, Any]:
         """Constructs a standard JSON-RPC 2.0 error frame.
 
         Args:
@@ -995,15 +994,8 @@ class MCPServer:
         Returns:
             A JSON-RPC 2.0 error response dictionary.
         """
-        return {
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "error": {
-                "code": code,
-                "message": message
-            }
-        }
+        return {"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}}
+
 
 if __name__ == "__main__":
     mcp.run()
-

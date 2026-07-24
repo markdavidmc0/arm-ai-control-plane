@@ -1,0 +1,14 @@
+# SPIFFE/SPIRE Workload Attestation Policy for Arm GKE Containers
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: arm-mvcp-spiffe-attestation
+spec:
+  spiffeIDTemplate: "spiffe://federated-ai.arm.com/ns/{{ .PodMeta.Namespace }}/sa/{{ .PodSpec.ServiceAccountName }}/pod/{{ .PodMeta.Name }}"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: arm-mvcp-control-plane
+  workloadAttestors:
+  - k8s:
+      saNames: ["arm-mvcp-runner-sa"]
+      namespaces: ["arm-control-plane"]
