@@ -1,27 +1,29 @@
 """MCP Registry & Multiplexer APIRouter.
 
-Provides Workspace Slicing endpoints (`/api/v1/registry/tools`) inspecting
-`X-Workspace-Context` header (< 1,500 tokens), search meta-tool execution,
-dynamic tool registration (`/api/v1/registry/register`), upstream MCP server registration
+Provides Workspace Slicing endpoints (`/api/v1/registry/tools`), search meta-tool execution,
+domain-sliced tool registration (`/api/v1/registry/register`), upstream MCP server registration
 (`/api/v1/registry/servers/register`), and transparent federated tool execution (`/api/v1/registry/call`).
 """
 
 from typing import Any
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel, Field
+from src.control_plane.services.auth_service import AuthService
 from src.control_plane.services.mcp_multiplexer import MCPMultiplexerService
 from src.control_plane.services.upstream_mcp_client import UpstreamMCPClientService
 
 router = APIRouter(prefix="/api/v1/registry", tags=["MCP Master Registry"])
 multiplexer_service = MCPMultiplexerService()
 upstream_client_service = UpstreamMCPClientService()
+auth_service = AuthService()
 
 
 class RegisterToolRequest(BaseModel):
-    domain: str = Field(
-        ..., json_schema_extra={"example": "physical-ai"}, description="Workspace domain category"
+    domain: str | None = Field(
+        None, json_schema_extra={"example": "physical-ai"}, description="Workspace domain category"
     )
-    tool_schema: dict[str, Any] = Field(..., description="Valid MCP tool schema object")
+    tool_schema: dict[str, Any] | None = Field(None, description="Valid MCP tool schema object")
+    tools: list[dict[str, Any]] | None = Field(None, description="Batch list of domain-sliced tool schemas")
 
 
 class SearchToolsRequest(BaseModel):
@@ -83,10 +85,48 @@ async def search_tools_meta(req: SearchToolsRequest):
 
 
 @router.post("/register")
-async def register_domain_tool(req: RegisterToolRequest):
-    """Registers a new tool dynamically into the Master MCP Registry from CI/CD workflows."""
-    res = multiplexer_service.register_tool(domain=req.domain, tool_schema=req.tool_schema)
-    return res
+async def register_domain_tool(
+    req: RegisterToolRequest,
+    x_judge_api_key: str | None = Header(None, alias="x-judge-api-key"),
+    authorization: str | None = Header(None, alias="authorization"),
+):
+    """Registers new tools dynamically into the Master MCP Registry via Keycloak JWT or API Key.
+
+    Supports both single tool registration (`tool_schema`) and domain-sliced batch registration (`tools`).
+    """
+    key_to_check = authorization or x_judge_api_key
+    if key_to_check:
+        record = auth_service.verify_key(key_to_check)
+        if not record:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired Keycloak JWT Bearer Token or API Key.",
+            )
+
+    registered_tools = []
+
+    # Handle Batch Tools Array Payload
+    if req.tools:
+        for tool in req.tools:
+            target_domain = tool.get("domain") or req.domain or "cloud-ai"
+            res = multiplexer_service.register_tool(domain=target_domain, tool_schema=tool)
+            registered_tools.append(res)
+        return {
+            "status": "SUCCESS",
+            "message": f"Registered {len(registered_tools)} domain-sliced tools.",
+            "registered_count": len(registered_tools),
+            "tools": registered_tools,
+        }
+
+    # Handle Single Tool Payload
+    if req.tool_schema and req.domain:
+        res = multiplexer_service.register_tool(domain=req.domain, tool_schema=req.tool_schema)
+        return res
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Payload must contain either 'tools' array or 'tool_schema' object with 'domain'.",
+    )
 
 
 @router.post("/servers/register")
@@ -114,13 +154,11 @@ async def execute_tool_call(req: ToolCallRequest):
     is_upstream, endpoint_url = multiplexer_service.get_tool_owner(req.name)
 
     if is_upstream and endpoint_url:
-        # Reverse proxy tool execution frame down to upstream server URL
         result = await upstream_client_service.proxy_tool_call(
             endpoint_url=endpoint_url, tool_name=req.name, arguments=req.arguments
         )
         return result
     else:
-        # Local execution response
         return {
             "jsonrpc": "2.0",
             "result": {

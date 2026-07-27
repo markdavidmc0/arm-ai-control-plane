@@ -119,6 +119,16 @@
             }
           }
         }
+      },
+      {
+        "name": "vllm_arm_kv_cache_allocator_analyzer",
+        "description": "Analyzes vLLM KV Cache allocation efficiency on Neoverse N2",
+        "language": "python",
+        "domain": "cloud-ai",
+        "parameters": {
+          "type": "object",
+          "properties": {}
+        }
       }
     ],
     "mobile-ai": [
@@ -168,6 +178,24 @@
       "tool_names": [
         "arm_official_hardware_telemetry",
         "arm_official_kleidiai_bench"
+      ]
+    },
+    "performix-mcp-cluster": {
+      "server_id": "performix-mcp-cluster",
+      "domain": "cloud-ai",
+      "endpoint_url": "http://performix-mcp-service.default.svc.cluster.local:8080/mcp",
+      "tool_count": 1,
+      "tool_names": [
+        "vllm_sve_kv_cache_optimize"
+      ]
+    },
+    "arm-metis-mcp-cluster": {
+      "server_id": "arm-metis-mcp-cluster",
+      "domain": "hardware-and-systems",
+      "endpoint_url": "http://arm-metis-mcp-service.default.svc.cluster.local:9000/mcp",
+      "tool_count": 1,
+      "tool_names": [
+        "llvm_mca_assembly_analyzer"
       ]
     }
   }

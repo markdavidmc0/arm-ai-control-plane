@@ -1,0 +1,73 @@
+name: Platform Control Plane CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-and-validate:
+    name: Pytest Unit Tests & Schema Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv Package Manager
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Run Pytest Test Suite
+        run: |
+          uv sync
+          uv run pytest
+
+  build-and-deploy:
+    name: Build Container Images & Trigger Kubernetes Rolling Update
+    needs: test-and-validate
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker gcr.io --quiet
+
+      - name: Build & Push Gateway Image
+        run: |
+          IMAGE_TAG="gcr.io/${{ secrets.GCP_PROJECT_ID }}/mvcp-gateway:${{ github.sha }}"
+          LATEST_TAG="gcr.io/${{ secrets.GCP_PROJECT_ID }}/mvcp-gateway:latest"
+          docker build -t $IMAGE_TAG -t $LATEST_TAG .
+          docker push $IMAGE_TAG
+          docker push $LATEST_TAG
+
+      - name: Get GKE Cluster Credentials
+        run: |
+          gcloud container clusters get-credentials mvcp-gke-cluster \
+            --zone us-central1-a \
+            --project ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Apply Kubernetes Rolling Update (Zero Downtime)
+        run: |
+          kubectl apply -f .platform/deployments/gateway-and-envoy.yaml
+          kubectl apply -f .platform/deployments/in-house-mcp-servers.yaml
+          kubectl set image deployment/mvcp-gateway-deployment control-plane-gateway=gcr.io/${{ secrets.GCP_PROJECT_ID }}/mvcp-gateway:${{ github.sha }}
+          kubectl rollout status deployment/mvcp-gateway-deployment --timeout=120s

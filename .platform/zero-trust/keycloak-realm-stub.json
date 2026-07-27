@@ -1,10 +1,14 @@
 {
-  "realm": "arm-mvcp-realm",
+  "realm": "arm-platform",
   "enabled": true,
-  "displayName": "Arm MVCP OAuth 2.0 / OIDC M2M Realm",
-  "tokenLifespan": 3600,
+  "displayName": "Arm Platform OAuth 2.0 / OIDC M2M Realm",
+  "accessTokenLifespan": 900,
   "roles": {
     "realm": [
+      {
+        "name": "mcp-registrar",
+        "description": "Permission to register tools and servers into Master MCP Registry"
+      },
       {
         "name": "mvcp_judge",
         "description": "Full administrative access for Hackathon judges"
@@ -12,29 +16,34 @@
       {
         "name": "mvcp_developer",
         "description": "Developer scoped access for compiler and profiling tools"
-      },
-      {
-        "name": "mvcp_m2m_runner",
-        "description": "Machine-to-Machine automated CI/CD runner"
       }
     ]
   },
+  "clientScopes": [
+    {
+      "name": "tools:register",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true"
+      }
+    }
+  ],
   "clients": [
     {
-      "clientId": "arm-m2m-ci-runner",
-      "name": "GitHub Actions M2M CI Client",
-      "secret": "arm_m2m_client_secret_stub_2026",
+      "clientId": "github-ci-runner",
+      "name": "GitHub Actions M2M CI/CD Runner Client",
+      "secret": "mcp_ci_runner_secret_2026",
       "serviceAccountsEnabled": true,
-      "authorizationServicesEnabled": true,
-      "directAccessGrantsEnabled": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
       "clientAuthenticatorType": "client-secret",
       "protocol": "openid-connect",
       "defaultClientScopes": [
         "web-origins",
         "roles",
         "profile",
-        "compiler",
-        "autotuner"
+        "tools:register"
       ]
     }
   ]
