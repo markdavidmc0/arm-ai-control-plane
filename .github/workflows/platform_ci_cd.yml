@@ -36,14 +36,19 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: 'read'
+      id-token: 'write' # Required for requesting OIDC JWT token from GitHub
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud
+      - name: Authenticate to Google Cloud via Workload Identity Federation
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          workload_identity_provider: 'projects/389363417412/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider'
+          service_account: 'gke-deployer@sovereign-ai-495715.iam.gserviceaccount.com'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -53,21 +58,34 @@ jobs:
 
       - name: Build & Push Gateway Image
         run: |
-          IMAGE_TAG="gcr.io/${{ secrets.GCP_PROJECT_ID }}/mvcp-gateway:${{ github.sha }}"
-          LATEST_TAG="gcr.io/${{ secrets.GCP_PROJECT_ID }}/mvcp-gateway:latest"
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          if [ -z "$PROJECT_ID" ]; then
+            PROJECT_ID="sovereign-ai-495715"
+          fi
+          IMAGE_TAG="gcr.io/${PROJECT_ID}/mvcp-gateway:${{ github.sha }}"
+          LATEST_TAG="gcr.io/${PROJECT_ID}/mvcp-gateway:latest"
           docker build -t $IMAGE_TAG -t $LATEST_TAG .
           docker push $IMAGE_TAG
           docker push $LATEST_TAG
 
       - name: Get GKE Cluster Credentials
         run: |
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          if [ -z "$PROJECT_ID" ]; then
+            PROJECT_ID="sovereign-ai-495715"
+          fi
           gcloud container clusters get-credentials mvcp-gke-cluster \
             --zone us-central1-a \
-            --project ${{ secrets.GCP_PROJECT_ID }}
+            --project ${PROJECT_ID}
 
       - name: Apply Kubernetes Rolling Update (Zero Downtime)
         run: |
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          if [ -z "$PROJECT_ID" ]; then
+            PROJECT_ID="sovereign-ai-495715"
+          fi
+          kubectl apply -f .platform/deployments/keycloak.yaml
           kubectl apply -f .platform/deployments/gateway-and-envoy.yaml
           kubectl apply -f .platform/deployments/in-house-mcp-servers.yaml
-          kubectl set image deployment/mvcp-gateway-deployment control-plane-gateway=gcr.io/${{ secrets.GCP_PROJECT_ID }}/mvcp-gateway:${{ github.sha }}
+          kubectl set image deployment/mvcp-gateway-deployment control-plane-gateway=gcr.io/${PROJECT_ID}/mvcp-gateway:${{ github.sha }}
           kubectl rollout status deployment/mvcp-gateway-deployment --timeout=120s
