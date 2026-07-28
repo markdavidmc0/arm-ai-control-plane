@@ -12,13 +12,12 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 ENV PATH="/root/.cargo/bin:$PATH"
 
-# 2. Copy dependency manifest FIRST (invalidates dependency layer ONLY when dependencies change)
-COPY pyproject.toml ./
+# 2. Copy dependency manifests FIRST (pyproject.toml + uv.lock for deterministic installs)
+COPY pyproject.toml uv.lock ./
 
-# 3. Install dependencies into virtual environment using UV cache mount
+# 3. Install production dependencies into virtual environment using uv sync
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv venv /app/.venv && \
-    uv pip install -r pyproject.toml
+    uv sync --frozen --no-dev
 
 # ==============================================================================
 # Production Runtime Stage
@@ -27,10 +26,10 @@ FROM python:3.12-slim AS runtime
 
 WORKDIR /app
 
-# Copy virtual environment from builder stage (Cached until pyproject.toml changes)
+# Copy virtual environment from builder stage (Cached until lockfile changes)
 COPY --from=builder /app/.venv /app/.venv
 
-# Copy application source code LAST (Ensures fast rebuilds when python files change)
+# Copy application source code LAST
 COPY src /app/src
 COPY config /app/config
 COPY .platform /app/.platform
