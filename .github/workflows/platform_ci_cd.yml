@@ -53,39 +53,33 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Set up Docker Buildx (Cache Optimization)
+        uses: docker/setup-buildx-action@v3
+
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker gcr.io --quiet
 
-      - name: Build & Push Gateway Image
-        run: |
-          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
-          if [ -z "$PROJECT_ID" ]; then
-            PROJECT_ID="sovereign-ai-495715"
-          fi
-          IMAGE_TAG="gcr.io/${PROJECT_ID}/mvcp-gateway:${{ github.sha }}"
-          LATEST_TAG="gcr.io/${PROJECT_ID}/mvcp-gateway:latest"
-          docker build -t $IMAGE_TAG -t $LATEST_TAG .
-          docker push $IMAGE_TAG
-          docker push $LATEST_TAG
+      - name: Build & Push Gateway Image with GitHub Actions Caching
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            gcr.io/sovereign-ai-495715/mvcp-gateway:${{ github.sha }}
+            gcr.io/sovereign-ai-495715/mvcp-gateway:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Get GKE Cluster Credentials
         run: |
-          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
-          if [ -z "$PROJECT_ID" ]; then
-            PROJECT_ID="sovereign-ai-495715"
-          fi
           gcloud container clusters get-credentials mvcp-gke-cluster \
             --zone us-central1-a \
-            --project ${PROJECT_ID}
+            --project sovereign-ai-495715
 
       - name: Apply Kubernetes Rolling Update (Zero Downtime)
         run: |
-          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
-          if [ -z "$PROJECT_ID" ]; then
-            PROJECT_ID="sovereign-ai-495715"
-          fi
           kubectl apply -f .platform/deployments/keycloak.yaml
           kubectl apply -f .platform/deployments/gateway-and-envoy.yaml
           kubectl apply -f .platform/deployments/in-house-mcp-servers.yaml
-          kubectl set image deployment/mvcp-gateway-deployment control-plane-gateway=gcr.io/${PROJECT_ID}/mvcp-gateway:${{ github.sha }}
+          kubectl set image deployment/mvcp-gateway-deployment control-plane-gateway=gcr.io/sovereign-ai-495715/mvcp-gateway:${{ github.sha }}
           kubectl rollout status deployment/mvcp-gateway-deployment --timeout=120s
