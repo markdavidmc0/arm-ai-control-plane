@@ -20,7 +20,8 @@ spec:
     spec:
       containers:
       - name: official-arm-mcp-server
-        image: gcr.io/arm-federated-ai/official-arm-mcp:latest
+        image: gcr.io/sovereign-ai-495715/official-arm-mcp:v1.0.0
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8000
         env:
@@ -72,7 +73,8 @@ spec:
     spec:
       containers:
       - name: performix-autotuner-server
-        image: gcr.io/arm-federated-ai/performix-mcp:latest
+        image: gcr.io/sovereign-ai-495715/performix-mcp:v1.0.0
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
         env:
@@ -124,7 +126,8 @@ spec:
     spec:
       containers:
       - name: arm-metis-simulator-server
-        image: gcr.io/arm-federated-ai/arm-metis-mcp:latest
+        image: gcr.io/sovereign-ai-495715/arm-metis-mcp:v1.0.0
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 9000
         env:
