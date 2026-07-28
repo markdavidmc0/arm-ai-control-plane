@@ -23,8 +23,10 @@ jobs:
           workload_identity_provider: 'projects/389363417412/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider'
           service_account: 'gke-deployer@sovereign-ai-495715.iam.gserviceaccount.com'
 
-      - name: Set up Cloud SDK
+      - name: Set up Cloud SDK & GKE Auth Plugin
         uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: 'gke-gcloud-auth-plugin'
 
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker gcr.io --quiet
@@ -55,3 +57,19 @@ jobs:
           docker pull ${UPSTREAM_SRC}
           docker tag ${UPSTREAM_SRC} ${TARGET_DEST}
           docker push ${TARGET_DEST}
+
+      - name: Get GKE Cluster Credentials
+        run: |
+          gcloud container clusters get-credentials mvcp-gke-cluster \
+            --zone us-central1-a \
+            --project sovereign-ai-495715
+
+      - name: Trigger Automated GKE Rolling Restart for Synced Images
+        run: |
+          echo "Triggering zero-downtime rolling restart for updated MCP servers..."
+          kubectl rollout restart deployment/official-arm-mcp-deployment
+          kubectl rollout restart deployment/performix-mcp-deployment
+          kubectl rollout restart deployment/arm-metis-mcp-deployment
+          kubectl rollout status deployment/official-arm-mcp-deployment --timeout=120s
+          kubectl rollout status deployment/performix-mcp-deployment --timeout=120s
+          kubectl rollout status deployment/arm-metis-mcp-deployment --timeout=120s
