@@ -61,7 +61,7 @@ jobs:
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker gcr.io --quiet
 
-      - name: Build & Push Gateway Image with GitHub Actions Caching
+      - name: Build & Push Gateway & In-House MCP Server Images
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -69,6 +69,9 @@ jobs:
           tags: |
             gcr.io/sovereign-ai-495715/mvcp-gateway:${{ github.sha }}
             gcr.io/sovereign-ai-495715/mvcp-gateway:latest
+            gcr.io/sovereign-ai-495715/official-arm-mcp:v1.0.0
+            gcr.io/sovereign-ai-495715/performix-mcp:v1.0.0
+            gcr.io/sovereign-ai-495715/arm-metis-mcp:v1.0.0
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -85,3 +88,6 @@ jobs:
           kubectl apply -f .platform/deployments/in-house-mcp-servers.yaml
           kubectl set image deployment/mvcp-gateway-deployment control-plane-gateway=gcr.io/sovereign-ai-495715/mvcp-gateway:${{ github.sha }}
           kubectl rollout status deployment/mvcp-gateway-deployment --timeout=300s
+          kubectl rollout status deployment/official-arm-mcp-deployment --timeout=120s
+          kubectl rollout status deployment/performix-mcp-deployment --timeout=120s
+          kubectl rollout status deployment/arm-metis-mcp-deployment --timeout=120s
