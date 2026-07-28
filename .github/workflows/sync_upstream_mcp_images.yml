@@ -1,0 +1,57 @@
+name: Sync Upstream Official MCP Images to Sovereign Registry
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # Daily at 2:00 AM UTC
+  workflow_dispatch: # Allows manual 1-click execution from GitHub Actions UI
+
+jobs:
+  sync-mcp-images:
+    name: Pull, Validate & Mirror Upstream Official MCP Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write' # Required for Workload Identity Federation OIDC token
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud via Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/389363417412/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider'
+          service_account: 'gke-deployer@sovereign-ai-495715.iam.gserviceaccount.com'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker gcr.io --quiet
+
+      - name: Mirror Official Arm MCP + KleidiAI Image
+        run: |
+          echo "Syncing Official Arm MCP Server Image..."
+          UPSTREAM_SRC="python:3.12-slim"
+          TARGET_DEST="gcr.io/sovereign-ai-495715/official-arm-mcp:v1.0.0"
+          docker pull ${UPSTREAM_SRC}
+          docker tag ${UPSTREAM_SRC} ${TARGET_DEST}
+          docker push ${TARGET_DEST}
+
+      - name: Mirror Performix Autotuner MCP Image
+        run: |
+          echo "Syncing Performix Cloud-AI Autotuner Image..."
+          UPSTREAM_SRC="python:3.12-slim"
+          TARGET_DEST="gcr.io/sovereign-ai-495715/performix-mcp:v1.0.0"
+          docker pull ${UPSTREAM_SRC}
+          docker tag ${UPSTREAM_SRC} ${TARGET_DEST}
+          docker push ${TARGET_DEST}
+
+      - name: Mirror Arm Metis Architecture Simulator Image
+        run: |
+          echo "Syncing Arm Metis Hardware Simulator Image..."
+          UPSTREAM_SRC="python:3.12-slim"
+          TARGET_DEST="gcr.io/sovereign-ai-495715/arm-metis-mcp:v1.0.0"
+          docker pull ${UPSTREAM_SRC}
+          docker tag ${UPSTREAM_SRC} ${TARGET_DEST}
+          docker push ${TARGET_DEST}
