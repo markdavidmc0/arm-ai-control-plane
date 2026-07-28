@@ -79,7 +79,8 @@ spec:
     spec:
       containers:
       - name: control-plane-gateway
-        image: gcr.io/arm-federated-ai/mvcp-gateway:latest
+        image: gcr.io/sovereign-ai-495715/mvcp-gateway:latest
+        imagePullPolicy: Always
         ports:
         - containerPort: 8000
         env:
@@ -87,8 +88,8 @@ spec:
           value: "8000"
         resources:
           requests:
-            cpu: "500m"
-            memory: "512Mi"
+            cpu: "250m"
+            memory: "256Mi"
           limits:
             cpu: "2000m"
             memory: "2048Mi"
