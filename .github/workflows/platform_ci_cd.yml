@@ -50,8 +50,10 @@ jobs:
           workload_identity_provider: 'projects/389363417412/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider'
           service_account: 'gke-deployer@sovereign-ai-495715.iam.gserviceaccount.com'
 
-      - name: Set up Cloud SDK
+      - name: Set up Cloud SDK & GKE Auth Plugin
         uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: 'gke-gcloud-auth-plugin'
 
       - name: Set up Docker Buildx (Cache Optimization)
         uses: docker/setup-buildx-action@v3
