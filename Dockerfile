@@ -4,13 +4,8 @@ FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
-# 1. Install system utilities using APT cache mount
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-
-ENV PATH="/root/.cargo/bin:$PATH"
+# 1. Copy official prebuilt uv binary (Faster, 100% reliable, zero network curl overhead)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # 2. Copy dependency manifests FIRST (pyproject.toml + uv.lock for deterministic installs)
 COPY pyproject.toml uv.lock ./
