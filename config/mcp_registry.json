@@ -48,7 +48,7 @@
           }
         }
       },
-      "upstream_server": "http://official-arm-mcp.internal:8000/mcp"
+      "upstream_server": "http://official-arm-mcp-service.default.svc.cluster.local:8000/mcp"
     },
     {
       "name": "arm_official_kleidiai_bench",
@@ -70,7 +70,7 @@
           }
         }
       },
-      "upstream_server": "http://official-arm-mcp.internal:8000/mcp"
+      "upstream_server": "http://official-arm-mcp-service.default.svc.cluster.local:8000/mcp"
     }
   ],
   "domain_tools": {
