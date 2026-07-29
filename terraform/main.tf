@@ -166,25 +166,6 @@ resource "google_container_node_pool" "arm_sandbox_nodes" {
   }
 }
 
-# --- Google Secret Manager for Keycloak M2M Client Secret ---
-resource "random_password" "keycloak_m2m_secret" {
-  length  = 32
-  special = false
-}
-
-resource "google_secret_manager_secret" "keycloak_m2m_secret" {
-  secret_id = "keycloak-m2m-secret"
-
-  replication {
-    auto {}
-  }
-}
-
-resource "google_secret_manager_secret_version" "keycloak_m2m_secret_v1" {
-  secret      = google_secret_manager_secret.keycloak_m2m_secret.id
-  secret_data = random_password.keycloak_m2m_secret.result
-}
-
 # --- Cloud DNS Private Managed Zone for arm.internal ---
 resource "google_dns_managed_zone" "arm_internal" {
   name        = "arm-internal-zone"

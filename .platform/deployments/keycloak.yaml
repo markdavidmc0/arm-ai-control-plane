@@ -1,13 +1,4 @@
 apiVersion: v1
-kind: Secret
-metadata:
-  name: keycloak-m2m-credentials
-  namespace: default
-type: Opaque
-stringData:
-  KEYCLOAK_M2M_SECRET: "mcp_ci_runner_sec_9f83a21e40b712"
----
-apiVersion: v1
 kind: ConfigMap
 metadata:
   name: keycloak-realm-config
@@ -18,7 +9,7 @@ data:
       "realm": "arm-platform",
       "enabled": true,
       "displayName": "Arm Platform OAuth 2.0 / OIDC M2M Realm",
-      "accessTokenLifespan": 900,
+      "accessTokenLifespan": 300,
       "roles": {
         "realm": [
           {
@@ -36,13 +27,17 @@ data:
       "clients": [
         {
           "clientId": "github-ci-runner",
-          "name": "GitHub Actions M2M CI/CD Runner Client",
-          "secret": "${env.KEYCLOAK_M2M_SECRET}",
+          "name": "GitHub Actions Direct OIDC M2M Client",
           "serviceAccountsEnabled": true,
           "standardFlowEnabled": false,
-          "directAccessGrantsEnabled": true,
-          "clientAuthenticatorType": "client-secret",
+          "directAccessGrantsEnabled": false,
+          "clientAuthenticatorType": "client-jwt",
           "protocol": "openid-connect",
+          "attributes": {
+            "use.jwks.url": "true",
+            "jwks.url": "https://token.actions.githubusercontent.com/.well-known/jwks.json",
+            "token.endpoint.auth.signing.alg": "RS256"
+          },
           "defaultClientScopes": [
             "web-origins",
             "roles",
@@ -90,11 +85,6 @@ spec:
           value: "admin123"
         - name: KC_HTTP_PORT
           value: "8080"
-        - name: KEYCLOAK_M2M_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: keycloak-m2m-credentials
-              key: KEYCLOAK_M2M_SECRET
         ports:
         - containerPort: 8080
         volumeMounts:
