@@ -2,6 +2,17 @@
 # LEAST-PRIVILEGE IAM & SERVICE ACCOUNT CONFIGURATION
 # ==============================================================================
 
+# --- Default Compute Service Account (Used by existing GKE cluster) ---
+data "google_compute_default_service_account" "default" {
+  project = var.project_id
+}
+
+resource "google_project_iam_member" "gke_default_nodes_artifact_registry" {
+  project = var.project_id
+  role    = "roles/artifactregistry.reader"
+  member  = "serviceAccount:${data.google_compute_default_service_account.default.email}"
+}
+
 # --- 1. Dedicated GKE Worker Node Service Account ---
 resource "google_service_account" "gke_nodes" {
   account_id   = "mvcp-gke-nodes-sa"

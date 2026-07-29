@@ -61,6 +61,14 @@ data:
                   address: mvcp-gateway-service
                   port_value: 8000
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mvcp-gateway-sa
+  namespace: default
+  annotations:
+    iam.gke.io/gcp-service-account: mvcp-gateway-gsa@sovereign-ai-495715.iam.gserviceaccount.com
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -78,6 +86,7 @@ spec:
       labels:
         app: mvcp-gateway
     spec:
+      serviceAccountName: mvcp-gateway-sa
       tolerations:
       - key: "kubernetes.io/arch"
         operator: "Equal"
