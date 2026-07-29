@@ -179,7 +179,7 @@ metadata:
   name: envoy-edge-guard-service
   namespace: default
 spec:
-  type: LoadBalancer
+  type: ClusterIP
   selector:
     app: envoy-edge-guard
   ports:
