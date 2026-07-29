@@ -57,9 +57,10 @@ data:
           endpoints:
           - lb_endpoints:
             - endpoint:
-                socket_address:
-                  address: mvcp-gateway-service
-                  port_value: 8000
+                address:
+                  socket_address:
+                    address: mvcp-gateway-service
+                    port_value: 8000
 ---
 apiVersion: v1
 kind: ServiceAccount

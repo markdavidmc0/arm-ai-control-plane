@@ -55,16 +55,20 @@ jobs:
         with:
           install_components: 'gke-gcloud-auth-plugin'
 
+      - name: Set up QEMU for Arm64 Emulation
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx (Cache Optimization)
         uses: docker/setup-buildx-action@v3
 
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker gcr.io --quiet
 
-      - name: Build & Push Control Plane Gateway Image
+      - name: Build & Push Arm64 Control Plane Gateway Image
         uses: docker/build-push-action@v5
         with:
           context: .
+          platforms: linux/arm64
           push: true
           tags: |
             gcr.io/sovereign-ai-495715/mvcp-gateway:${{ github.sha }}
