@@ -127,8 +127,9 @@ resource "google_container_node_pool" "arm_sandbox_nodes" {
   node_count = 2
 
   node_config {
-    machine_type = "t2a-standard-4" # Arm Tau T2A processor (64-bit Armv8.2-A)
-    image_type   = "COS_CONTAINERD" # Container-Optimized OS with containerd (required for GKE Sandbox)
+    machine_type    = "t2a-standard-4" # Arm Tau T2A processor (64-bit Armv8.2-A)
+    image_type      = "COS_CONTAINERD" # Container-Optimized OS with containerd (required for GKE Sandbox)
+    service_account = google_service_account.gke_nodes.email
 
     # Enable gVisor Sandbox
     sandbox_config {
@@ -136,11 +137,7 @@ resource "google_container_node_pool" "arm_sandbox_nodes" {
     }
 
     oauth_scopes = [
-      "https://www.googleapis.com/auth/devstorage.read_only",
-      "https://www.googleapis.com/auth/logging.write",
-      "https://www.googleapis.com/auth/monitoring",
-      "https://www.googleapis.com/auth/service.management.readonly",
-      "https://www.googleapis.com/auth/servicecontrol",
+      "https://www.googleapis.com/auth/cloud-platform"
     ]
 
     metadata = {
