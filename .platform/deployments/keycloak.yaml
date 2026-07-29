@@ -117,8 +117,10 @@ kind: Service
 metadata:
   name: keycloak-service
   namespace: default
+  annotations:
+    networking.gke.io/load-balancer-type: "Internal"
 spec:
-  type: ClusterIP
+  type: LoadBalancer
   selector:
     app: keycloak
   ports:

@@ -178,8 +178,10 @@ kind: Service
 metadata:
   name: envoy-edge-guard-service
   namespace: default
+  annotations:
+    networking.gke.io/load-balancer-type: "Internal"
 spec:
-  type: ClusterIP
+  type: LoadBalancer
   selector:
     app: envoy-edge-guard
   ports:

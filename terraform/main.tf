@@ -184,3 +184,17 @@ resource "google_secret_manager_secret_version" "keycloak_m2m_secret_v1" {
   secret      = google_secret_manager_secret.keycloak_m2m_secret.id
   secret_data = random_password.keycloak_m2m_secret.result
 }
+
+# --- Cloud DNS Private Managed Zone for arm.internal ---
+resource "google_dns_managed_zone" "arm_internal" {
+  name        = "arm-internal-zone"
+  dns_name    = "arm.internal."
+  description = "Private DNS zone for internal platform service discovery"
+  visibility  = "private"
+
+  private_visibility_config {
+    networks {
+      network_url = google_compute_network.vpc_network.id
+    }
+  }
+}
