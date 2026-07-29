@@ -93,3 +93,10 @@ resource "google_service_account_iam_member" "mvcp_gateway_workload_identity" {
     google_container_cluster.primary
   ]
 }
+
+# IAM Role: Secret Accessor for Secret Manager (Keycloak Client Secret)
+resource "google_secret_manager_secret_iam_member" "keycloak_secret_accessor" {
+  secret_id = google_secret_manager_secret.keycloak_m2m_secret.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.mvcp_gateway.email}"
+}
