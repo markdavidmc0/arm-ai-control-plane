@@ -69,6 +69,13 @@ resource "google_project_iam_member" "github_ci_gke_developer" {
   member  = "serviceAccount:${google_service_account.github_ci.email}"
 }
 
+# Bind GitHub Actions OIDC Workload Identity Pool to mvcp-github-ci-sa
+resource "google_service_account_iam_member" "github_ci_workload_identity" {
+  service_account_id = google_service_account.github_ci.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principalSet://iam.googleapis.com/projects/389363417412/locations/global/workloadIdentityPools/github-actions-pool/attribute.repository/markdavidmc0/arm-ai-control-plane"
+}
+
 # --- 3. Workload Identity Service Account for Control Plane Gateway ---
 resource "google_service_account" "mvcp_gateway" {
   account_id   = "mvcp-gateway-gsa"
