@@ -8,7 +8,7 @@ metadata:
     app: official-arm-mcp
     mvcp.ai/server-type: base
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: official-arm-mcp
@@ -31,8 +31,8 @@ spec:
           value: "true"
         resources:
           requests:
-            cpu: "250m"
-            memory: "256Mi"
+            cpu: "100m"
+            memory: "128Mi"
           limits:
             cpu: "1000m"
             memory: "1024Mi"
@@ -61,7 +61,7 @@ metadata:
     app: performix-mcp
     mvcp.ai/domain: cloud-ai
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: performix-mcp
@@ -84,8 +84,8 @@ spec:
           value: "cloud-ai"
         resources:
           requests:
-            cpu: "250m"
-            memory: "256Mi"
+            cpu: "100m"
+            memory: "128Mi"
           limits:
             cpu: "1000m"
             memory: "1024Mi"
@@ -114,7 +114,7 @@ metadata:
     app: arm-metis-mcp
     mvcp.ai/domain: hardware-and-systems
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: arm-metis-mcp
@@ -137,8 +137,8 @@ spec:
           value: "hardware-and-systems"
         resources:
           requests:
-            cpu: "250m"
-            memory: "256Mi"
+            cpu: "100m"
+            memory: "128Mi"
           limits:
             cpu: "1000m"
             memory: "1024Mi"

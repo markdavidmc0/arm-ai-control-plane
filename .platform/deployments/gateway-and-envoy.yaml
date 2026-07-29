@@ -68,7 +68,7 @@ metadata:
   labels:
     app: mvcp-gateway
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: mvcp-gateway
@@ -88,11 +88,11 @@ spec:
           value: "8000"
         resources:
           requests:
-            cpu: "250m"
-            memory: "256Mi"
+            cpu: "100m"
+            memory: "128Mi"
           limits:
-            cpu: "2000m"
-            memory: "2048Mi"
+            cpu: "1000m"
+            memory: "1024Mi"
 ---
 apiVersion: v1
 kind: Service
@@ -115,7 +115,7 @@ metadata:
   labels:
     app: envoy-edge-guard
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: envoy-edge-guard
@@ -132,6 +132,13 @@ spec:
         volumeMounts:
         - name: envoy-config-volume
           mountPath: /etc/envoy
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
       volumes:
       - name: envoy-config-volume
         configMap:
