@@ -19,10 +19,7 @@ spec:
         mvcp.ai/server-type: base
     spec:
       tolerations:
-      - key: "kubernetes.io/arch"
-        operator: "Equal"
-        value: "arm64"
-        effect: "NoSchedule"
+      - operator: "Exists"
       containers:
       - name: official-arm-mcp-server
         image: gcr.io/sovereign-ai-495715/official-arm-mcp:v1.0.0
@@ -77,10 +74,7 @@ spec:
         mvcp.ai/domain: cloud-ai
     spec:
       tolerations:
-      - key: "kubernetes.io/arch"
-        operator: "Equal"
-        value: "arm64"
-        effect: "NoSchedule"
+      - operator: "Exists"
       containers:
       - name: performix-autotuner-server
         image: gcr.io/sovereign-ai-495715/performix-mcp:v1.0.0
@@ -135,10 +129,7 @@ spec:
         mvcp.ai/domain: hardware-and-systems
     spec:
       tolerations:
-      - key: "kubernetes.io/arch"
-        operator: "Equal"
-        value: "arm64"
-        effect: "NoSchedule"
+      - operator: "Exists"
       containers:
       - name: arm-metis-simulator-server
         image: gcr.io/sovereign-ai-495715/arm-metis-mcp:v1.0.0

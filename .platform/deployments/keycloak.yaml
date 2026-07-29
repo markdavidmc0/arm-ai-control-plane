@@ -62,10 +62,7 @@ spec:
         app: keycloak
     spec:
       tolerations:
-      - key: "kubernetes.io/arch"
-        operator: "Equal"
-        value: "arm64"
-        effect: "NoSchedule"
+      - operator: "Exists"
       containers:
       - name: keycloak
         image: quay.io/keycloak/keycloak:24.0.0
