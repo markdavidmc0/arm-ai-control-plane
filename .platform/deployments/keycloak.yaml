@@ -62,7 +62,14 @@ spec:
         app: keycloak
     spec:
       tolerations:
-      - operator: "Exists"
+      - key: "kubernetes.io/arch"
+        operator: "Equal"
+        value: "arm64"
+        effect: "NoSchedule"
+      - key: "sandbox.gke.io/runtime"
+        operator: "Equal"
+        value: "gvisor"
+        effect: "NoSchedule"
       containers:
       - name: keycloak
         image: quay.io/keycloak/keycloak:24.0.0

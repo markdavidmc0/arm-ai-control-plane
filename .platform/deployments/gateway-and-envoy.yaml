@@ -78,7 +78,14 @@ spec:
         app: mvcp-gateway
     spec:
       tolerations:
-      - operator: "Exists"
+      - key: "kubernetes.io/arch"
+        operator: "Equal"
+        value: "arm64"
+        effect: "NoSchedule"
+      - key: "sandbox.gke.io/runtime"
+        operator: "Equal"
+        value: "gvisor"
+        effect: "NoSchedule"
       containers:
       - name: control-plane-gateway
         image: gcr.io/sovereign-ai-495715/mvcp-gateway:latest
@@ -127,7 +134,14 @@ spec:
         app: envoy-edge-guard
     spec:
       tolerations:
-      - operator: "Exists"
+      - key: "kubernetes.io/arch"
+        operator: "Equal"
+        value: "arm64"
+        effect: "NoSchedule"
+      - key: "sandbox.gke.io/runtime"
+        operator: "Equal"
+        value: "gvisor"
+        effect: "NoSchedule"
       containers:
       - name: envoy-proxy
         image: envoyproxy/envoy:v1.28.0
