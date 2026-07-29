@@ -81,4 +81,8 @@ resource "google_service_account_iam_member" "mvcp_gateway_workload_identity" {
   service_account_id = google_service_account.mvcp_gateway.name
   role               = "roles/iam.workloadIdentityUser"
   member             = "serviceAccount:${var.project_id}.svc.id.goog[default/mvcp-gateway-sa]"
+
+  depends_on = [
+    google_container_cluster.primary
+  ]
 }

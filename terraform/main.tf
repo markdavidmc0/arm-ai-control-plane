@@ -140,6 +140,11 @@ resource "google_container_node_pool" "arm_sandbox_nodes" {
       sandbox_type = "gvisor"
     }
 
+    # Enable GKE Workload Identity metadata server on nodes
+    workload_metadata_config {
+      mode = "GKE_METADATA"
+    }
+
     oauth_scopes = [
       "https://www.googleapis.com/auth/cloud-platform"
     ]
