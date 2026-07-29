@@ -87,5 +87,6 @@ jobs:
           kubectl apply -f .platform/deployments/keycloak.yaml
           kubectl apply -f .platform/deployments/gateway-and-envoy.yaml
           kubectl apply -f .platform/deployments/in-house-mcp-servers.yaml
+          kubectl apply -f .platform/deployments/ingress.yaml
           kubectl set image deployment/mvcp-gateway-deployment control-plane-gateway=gcr.io/sovereign-ai-495715/mvcp-gateway:${{ github.sha }}
           kubectl rollout status deployment/mvcp-gateway-deployment --timeout=300s

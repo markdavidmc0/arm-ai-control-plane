@@ -179,9 +179,9 @@ metadata:
   name: envoy-edge-guard-service
   namespace: default
   annotations:
-    networking.gke.io/load-balancer-type: "Internal"
+    cloud.google.com/neg: '{"ingress": true}'
 spec:
-  type: LoadBalancer
+  type: NodePort
   selector:
     app: envoy-edge-guard
   ports:
