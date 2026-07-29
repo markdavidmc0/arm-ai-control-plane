@@ -51,6 +51,7 @@ data:
         type: LOGICAL_DNS
         dns_lookup_family: V4_ONLY
         lb_policy: ROUND_ROBIN
+        connect_timeout: 1s
         load_assignment:
           cluster_name: gateway_service
           endpoints:
