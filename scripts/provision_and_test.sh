@@ -12,7 +12,11 @@ error() { echo -e "\033[1;31m[ERROR]\033[0m $*"; exit 1; }
 # Re-orient directories: SCRIPT is in /scripts, ROOT is parent of scripts
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPTS_DIR}/.." && pwd)"
-CONFIG_FILE="${ROOT_DIR}/provision_config.json"
+if [[ -f "${ROOT_DIR}/config/provision_config.json" ]]; then
+    CONFIG_FILE="${ROOT_DIR}/config/provision_config.json"
+else
+    CONFIG_FILE="${ROOT_DIR}/provision_config.json"
+fi
 
 show_help() {
     echo "Usage: $0 [options]"
@@ -28,6 +32,19 @@ check_dependency() {
     local cmd=$1
     if ! command -v "$cmd" &> /dev/null; then
         error "Dependency '$cmd' is missing but required. Please install it to proceed."
+    fi
+}
+
+# Validate requirement tools
+check_dependency python3
+check_dependency gcloud
+check_dependency kubectl
+
+# --- Config File Integrity Validation ---
+validate_config() {
+    info "Validating configuration file: ${CONFIG_FILE}"
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        error "Configuration file 'config/provision_config.json' was not found!\n\n  \033[1;33m[HOW TO FIX THIS]\033[0m\n  1. Create a local copy of your config template:\n     \033[1;36mcp config/provision_config.template.json config/provision_config.json\033[0m\n  2. Open \033[1;32mconfig/provision_config.json\033[0m and populate your project ID, region, and Tailscale keys.\n  3. Re-run your desired command (e.g., ./scripts/provision_and_test.sh --dry-run)"
     fi
 }
 
@@ -54,9 +71,7 @@ if [[ "$MODE" == "help" ]]; then
 fi
 
 # Assert config file is present
-if [[ ! -f "$CONFIG_FILE" ]]; then
-    error "Configuration file 'provision_config.json' was not found!\n\n  \033[1;33m[HOW TO FIX THIS]\033[0m\n  1. Create a local copy of your config template:\n     \033[1;36mcp provision_config.template.json provision_config.json\033[0m\n  2. Open \033[1;32mprovision_config.json\033[0m and populate your project ID, region, and Tailscale keys.\n  3. Re-run your desired command (e.g., ./scripts/provision_and_test.sh --dry-run)"
-fi
+validate_config
 
 # Load variables
 PROJECT_ID=$(read_config_key "project_id")

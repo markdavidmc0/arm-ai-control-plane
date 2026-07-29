@@ -7,16 +7,20 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 cd "${REPO_ROOT}"
 
-# Verify configuration file presence
-if [[ ! -f "provision_config.json" ]]; then
-  echo "❌ Error: provision_config.json not found in repository root!"
+# Determine config file path
+if [[ -f "config/provision_config.json" ]]; then
+  CONFIG_FILE="config/provision_config.json"
+elif [[ -f "provision_config.json" ]]; then
+  CONFIG_FILE="provision_config.json"
+else
+  echo "❌ Error: config/provision_config.json not found!"
   exit 1
 fi
 
 # Dynamically parse variables to prevent hardcoded drift
-PROJECT_ID=$(python3 -c "import json; print(json.load(open('provision_config.json'))['project_id'])")
-ZONE=$(python3 -c "import json; print(json.load(open('provision_config.json'))['zone'])")
-CLUSTER_NAME=$(python3 -c "import json; print(json.load(open('provision_config.json'))['cluster_name'])")
+PROJECT_ID=$(python3 -c "import json; print(json.load(open('${CONFIG_FILE}'))['project_id'])")
+ZONE=$(python3 -c "import json; print(json.load(open('${CONFIG_FILE}'))['zone'])")
+CLUSTER_NAME=$(python3 -c "import json; print(json.load(open('${CONFIG_FILE}'))['cluster_name'])")
 NODE_POOL="arm-sandbox-node-pool"
 TARGET_NODES=2
 
