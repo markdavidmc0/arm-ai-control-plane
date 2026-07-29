@@ -16,28 +16,28 @@ An enterprise-grade, zero-trust **Master Model Context Protocol (MVCP) Control P
                                  │              Private VPC Network             │
                                  │            (mvcp-vpc-network)                │
                                  │                                              │
- ┌──────────────────────┐  OIDC  │  ┌─────────────────┐    ┌─────────────────┐ │
- │ GitHub Actions CI/CD │ ───────┼─>│ Keycloak (OIDC) │    │  MVCP Gateway   │ │
- │ (mvcp-github-ci-sa)  │        │  │ keycloak.arm.   │    │ gateway.arm.    │ │
- └──────────────────────┘        │  │    internal     │    │    internal     │ │
-                                 │  └────────┬────────┘    └────────┬────────┘ │
-                                 │           │                      │          │
-                                 │           ▼                      ▼          │
-                                 │  ┌────────────────────────────────────────┐ │
-                                 │  │        GKE Internal Ingress (L7)       │ │
-                                 │  │         (arm-platform-ingress)         │ │
-                                 │  └──────────────────┬─────────────────────┘ │
-                                 │                     │                       │
-                                 │                     ▼                       │
-                                 │  ┌────────────────────────────────────────┐ │
-                                 │  │      Envoy Edge Guard (Port 10000)     │ │
-                                 │  └──────────────────┬─────────────────────┘ │
-                                 │                     │                       │
-                                 │                     ▼                       │
-                                 │  ┌────────────────────────────────────────┐ │
-                                 │  │      Arm Sandbox Worker Node Pool      │ │
-                                 │  │   (Arm Tau T2A + gVisor Isolation)     │ │
-                                 │  └────────────────────────────────────────┘ │
+ ┌──────────────────────┐  OIDC  │  ┌─────────────────┐    ┌─────────────────┐  │
+ │ GitHub Actions CI/CD │ ───────┼─>│ Keycloak (OIDC) │    │  MVCP Gateway   │  │
+ │ (mvcp-github-ci-sa)  │        │  │ keycloak.arm.   │    │ gateway.arm.    │  │
+ └──────────────────────┘        │  │    internal     │    │    internal     │  │
+                                 │  └────────┬────────┘    └────────┬────────┘  │
+                                 │           │                      │           │
+                                 │           ▼                      ▼           │
+                                 │  ┌────────────────────────────────────────┐  │
+                                 │  │        GKE Internal Ingress (L7)       │  │
+                                 │  │         (arm-platform-ingress)         │  │
+                                 │  └──────────────────┬─────────────────────┘  │
+                                 │                     │                        │
+                                 │                     ▼                        │
+                                 │  ┌────────────────────────────────────────┐  │
+                                 │  │      Envoy Edge Guard (Port 10000)     │  │
+                                 │  └──────────────────┬─────────────────────┘  │
+                                 │                     │                        │
+                                 │                     ▼                        │
+                                 │  ┌────────────────────────────────────────┐  │
+                                 │  │      Arm Sandbox Worker Node Pool      │  │
+                                 │  │   (Arm Tau T2A + gVisor Isolation)     │  │
+                                 │  └────────────────────────────────────────┘  │
                                  └──────────────────────────────────────────────┘
 ```
 
@@ -51,23 +51,6 @@ An enterprise-grade, zero-trust **Master Model Context Protocol (MVCP) Control P
 * **🚦 Unified GKE Internal Ingress**: Port-free L7 HTTP routing and Container-Native Load Balancing (NEGs).
 * **🤖 Master Model Context Protocol (MCP)**: Automated discovery, dynamic routing, and health monitoring for federated MCP servers.
 * **⚙️ 100% Infrastructure-as-Code**: Fully automated GCP provisioning using Terraform and GitHub Actions OIDC Workload Identity Federation.
-
----
-
-## 📂 Repository Structure
-
-```
-.
-├── .github/workflows/          # GitHub Actions CI/CD pipelines (Arm64 Buildx + GKE)
-├── .platform/deployments/      # Kubernetes manifests (Envoy, Keycloak, Gateway, Ingress)
-├── config/                     # Platform provision template configurations
-├── terraform/                  # Terraform IaC (VPC, GKE, IAM, Secret Manager, Cloud DNS)
-├── src/                        # FastAPI Control Plane Gateway source code
-│   ├── api/                    # Route handlers (auth, registry, proxy)
-│   ├── core/                   # Core configuration and security logic
-│   └── models/                 # Pydantic data models
-└── tests/                      # Pytest unit and integration test suite
-```
 
 ---
 
