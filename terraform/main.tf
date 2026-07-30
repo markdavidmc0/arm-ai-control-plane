@@ -9,6 +9,10 @@ terraform {
       source  = "hashicorp/google-beta"
       version = "~> 5.0"
     }
+    tailscale = {
+      source  = "tailscale/tailscale"
+      version = "~> 0.17.0"
+    }
   }
 }
 

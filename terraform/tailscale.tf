@@ -1,14 +1,5 @@
 # --- Tailscale Infrastructure-as-Code Configuration ---
 
-terraform {
-  required_providers {
-    tailscale = {
-      source  = "tailscale/tailscale"
-      version = "~> 0.17.0"
-    }
-  }
-}
-
 variable "tailscale_api_key" {
   type        = string
   description = "Tailscale API Key or OAuth Secret for IaC provisioning"
