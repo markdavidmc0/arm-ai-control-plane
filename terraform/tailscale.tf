@@ -29,8 +29,8 @@ resource "tailscale_acl" "platform_acl" {
   count = var.tailscale_api_key != "" ? 1 : 0
   acl   = jsonencode({
     tagOwners = {
-      "tag:ci"            = ["group:devops"]
-      "tag:platform-node" = ["group:devops"]
+      "tag:ci"            = ["autogroup:admin"]
+      "tag:platform-node" = ["autogroup:admin"]
     }
     acls = [
       {
@@ -40,7 +40,7 @@ resource "tailscale_acl" "platform_acl" {
       },
       {
         action = "accept"
-        src    = ["group:devops"]
+        src    = ["autogroup:member"]
         dst    = ["*:*"]
       }
     ]
