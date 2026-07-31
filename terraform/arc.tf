@@ -2,26 +2,26 @@
 
 variable "github_pat" {
   type        = string
-  description = "Personal Access Token (PAT) for ARC runner scale set registration"
+  description = "Optional Personal Access Token (PAT). Leave blank for secretless Workload Identity OIDC."
   default     = ""
   sensitive   = true
 }
 
 variable "github_app_id" {
   type        = string
-  description = "GitHub App ID for ARC runner scaling"
+  description = "Optional GitHub App ID. Leave blank for secretless Workload Identity OIDC."
   default     = ""
 }
 
 variable "github_app_installation_id" {
   type        = string
-  description = "GitHub App Installation ID for ARC runner scaling"
+  description = "Optional GitHub App Installation ID."
   default     = ""
 }
 
 variable "github_app_private_key" {
   type        = string
-  description = "GitHub App Private Key (PEM format) for ARC runner scaling"
+  description = "Optional GitHub App Private Key."
   default     = ""
   sensitive   = true
 }
@@ -88,6 +88,54 @@ resource "helm_release" "arc_runner_set" {
   version          = "0.8.0"
   namespace        = kubernetes_namespace.arc_runners.metadata[0].name
   create_namespace = false
+
+  values = [
+    yamlencode({
+      template = {
+        spec = {
+          tolerations = [
+            {
+              key      = "kubernetes.io/arch"
+              operator = "Equal"
+              value    = "arm64"
+              effect   = "NoSchedule"
+            },
+            {
+              key      = "sandbox.gke.io/runtime"
+              operator = "Equal"
+              value    = "gvisor"
+              effect   = "NoSchedule"
+            }
+          ]
+        }
+      }
+      listenerTemplate = {
+        spec = {
+          containers = [
+            {
+              name    = "listener"
+              image   = "ghcr.io/actions/gha-runner-scale-set-controller:0.8.0"
+              command = ["/ghalistener"]
+            }
+          ]
+          tolerations = [
+            {
+              key      = "kubernetes.io/arch"
+              operator = "Equal"
+              value    = "arm64"
+              effect   = "NoSchedule"
+            },
+            {
+              key      = "sandbox.gke.io/runtime"
+              operator = "Equal"
+              value    = "gvisor"
+              effect   = "NoSchedule"
+            }
+          ]
+        }
+      }
+    })
+  ]
 
   set {
     name  = "githubConfigUrl"
