@@ -13,11 +13,6 @@ project_id = "sovereign-ai-495715"
 region     = "us-central1"
 zone       = "us-central1-a"
 
-# --- Tailscale IaC Credentials ---
-# Generate an API Key at: https://login.tailscale.com/admin/settings/keys
-tailscale_api_key = "tskey-api-k1234567890-YOUR_KEY_HERE"
-tailscale_tailnet = "your-tailnet.ts.net"
-
 # --- Actions Runner Controller (ARC) GitHub App Credentials (Optional) ---
 # Generate at: GitHub Org/Repo -> Settings -> Developer Settings -> GitHub Apps
 github_target_repo          = "markdavidmc0/arm-developer-workspace"

@@ -9,10 +9,6 @@ terraform {
       source  = "hashicorp/google-beta"
       version = "~> 5.0"
     }
-    tailscale = {
-      source  = "tailscale/tailscale"
-      version = "~> 0.17.0"
-    }
     helm = {
       source  = "hashicorp/helm"
       version = "~> 2.12.0"
@@ -86,24 +82,6 @@ resource "google_compute_firewall" "allow_envoy" {
   allow {
     protocol = "tcp"
     ports    = ["10000"]
-  }
-
-  source_ranges = ["0.0.0.0/0"]
-  target_tags   = ["gke-node"]
-}
-
-resource "google_compute_firewall" "allow_tailscale" {
-  name    = "mvcp-allow-tailscale"
-  network = google_compute_network.vpc_network.name
-
-  allow {
-    protocol = "udp"
-    ports    = ["41641"]
-  }
-
-  allow {
-    protocol = "tcp"
-    ports    = ["22", "80", "443"]
   }
 
   source_ranges = ["0.0.0.0/0"]
