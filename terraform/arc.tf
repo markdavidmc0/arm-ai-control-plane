@@ -126,18 +126,18 @@ resource "helm_release" "arc_runner_set" {
               env = [
                 {
                   name  = "SSL_CERT_FILE"
-                  value = "/etc/ssl/certs/internal-arm-tls.crt"
+                  value = "/etc/ssl/certs/combined-ca-bundle.crt"
                 },
                 {
                   name  = "REQUESTS_CA_BUNDLE"
-                  value = "/etc/ssl/certs/internal-arm-tls.crt"
+                  value = "/etc/ssl/certs/combined-ca-bundle.crt"
                 }
               ]
               volumeMounts = [
                 {
-                  name      = "internal-tls"
-                  mountPath = "/etc/ssl/certs/internal-arm-tls.crt"
-                  subPath   = "tls.crt"
+                  name      = "combined-ca"
+                  mountPath = "/etc/ssl/certs/combined-ca-bundle.crt"
+                  subPath   = "ca-bundle.crt"
                   readOnly  = true
                 }
               ]
@@ -145,9 +145,9 @@ resource "helm_release" "arc_runner_set" {
           ]
           volumes = [
             {
-              name = "internal-tls"
+              name = "combined-ca"
               secret = {
-                secretName = "internal-arm-tls"
+                secretName = "combined-ca-bundle"
               }
             }
           ]
