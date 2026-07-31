@@ -2,26 +2,26 @@
 
 variable "github_pat" {
   type        = string
-  description = "Optional Personal Access Token (PAT). Leave blank for secretless Workload Identity OIDC."
+  description = "Personal Access Token (PAT) for ARC runner scale set registration"
   default     = ""
   sensitive   = true
 }
 
 variable "github_app_id" {
   type        = string
-  description = "Optional GitHub App ID. Leave blank for secretless Workload Identity OIDC."
+  description = "GitHub App ID for ARC runner scaling"
   default     = ""
 }
 
 variable "github_app_installation_id" {
   type        = string
-  description = "Optional GitHub App Installation ID."
+  description = "GitHub App Installation ID for ARC runner scaling"
   default     = ""
 }
 
 variable "github_app_private_key" {
   type        = string
-  description = "Optional GitHub App Private Key."
+  description = "GitHub App Private Key (PEM format) for ARC runner scaling"
   default     = ""
   sensitive   = true
 }
@@ -79,8 +79,9 @@ resource "helm_release" "arc_controller" {
   ]
 }
 
-# Deploy AutoscalingRunnerSet for arm-developer-workspace using Workload Identity OIDC
+# Deploy AutoscalingRunnerSet for arm-developer-workspace
 resource "helm_release" "arc_runner_set" {
+  count            = (var.github_app_id != "" || var.github_pat != "") ? 1 : 0
   name             = "arm-developer-workspace-runner"
   repository       = "oci://ghcr.io/actions/actions-runner-controller-charts"
   chart            = "gha-runner-scale-set"
