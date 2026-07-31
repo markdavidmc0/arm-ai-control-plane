@@ -4,7 +4,7 @@
 # ==============================================================================
 # This script automates GitHub App creation/querying, saves the RSA private key
 # securely at ~/.ssh/arc-app.pem (chmod 600), updates terraform/terraform.tfvars,
-# and optionally runs 'terraform apply' in-memory.
+# and offers 'terraform apply' ONLY after verifying that the App is installed.
 # ==============================================================================
 
 set -e
@@ -44,7 +44,7 @@ fi
 # 3. Export private key in-memory for Terraform
 export TF_VAR_github_app_private_key="$(cat "${KEY_PATH}")"
 
-# 4. Check for existing GitHub App installations via REST API
+# 4. Check for active GitHub App installations via REST API
 echo "🔍 Querying active GitHub App installations for ${REPO_TARGET}..."
 INSTALLATIONS=$(gh api /user/installations 2>/dev/null || echo "[]")
 
@@ -66,26 +66,32 @@ github_app_id               = "${APP_ID}"
 github_app_installation_id  = "${INSTALL_ID}"
 EOF
   echo "✅ Updated '${TFVARS_FILE}' automatically!"
-else
-  echo "ℹ️  No active GitHub App installation found automatically."
-  echo "   Create a GitHub App in 1 click at: https://github.com/settings/apps/new"
-  echo "   Set Permissions: Actions (Read-only), Administration (Read & Write)"
-  echo "   Install on: https://github.com/${REPO_TARGET}"
-fi
 
-# 6. Offer automatic terraform apply
-echo ""
-read -p "❓ Do you want to run 'terraform apply' now using the in-memory private key? (y/n) " -n 1 -r
-echo ""
+  # 6. Offer automatic terraform apply ONLY when App IDs are confirmed!
+  echo ""
+  read -p "❓ Do you want to run 'terraform apply' now using the in-memory private key? (y/n) " -n 1 -r
+  echo ""
 
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-  echo "🚀 Running 'terraform apply'..."
-  cd terraform
-  terraform apply
+  if [[ $REPLY =~ ^[Yy]$ ]]; then
+    echo "🚀 Running 'terraform apply'..."
+    cd terraform
+    terraform apply
+  else
+    echo "=== 📋 Manual Terraform Execution Instructions ==="
+    echo "Run the following commands in your terminal whenever you wish to deploy:"
+    echo "  export TF_VAR_github_app_private_key=\"\$(cat ~/.ssh/arc-app.pem)\""
+    echo "  cd terraform && terraform apply"
+    echo "=========================================================="
+  fi
+
 else
-  echo "=== 📋 Manual Terraform Execution Instructions ==="
-  echo "Run the following commands in your terminal whenever you wish to deploy:"
-  echo "  export TF_VAR_github_app_private_key=\"\$(cat ~/.ssh/arc-app.pem)\""
-  echo "  cd terraform && terraform apply"
-  echo "=========================================================="
+  echo "⚠️  No active GitHub App installation detected for ${REPO_TARGET}."
+  echo "   To complete setup, create and install your GitHub App on GitHub:"
+  echo "   1. Open: https://github.com/settings/apps/new"
+  echo "   2. App Name: arm-control-plane-arc"
+  echo "   3. Homepage URL: https://github.com/markdavidmc0/arm-ai-control-plane"
+  echo "   4. Permissions: Actions (Read-only), Administration (Read & Write)"
+  echo "   5. Install the App on: https://github.com/${REPO_TARGET}"
+  echo "   6. Re-run 'bash scripts/bootstrap_github_app.sh' after installing!"
+  echo "🛑 Terraform execution blocked until GitHub App is installed."
 fi
