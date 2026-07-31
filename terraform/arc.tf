@@ -48,6 +48,25 @@ resource "helm_release" "arc_controller" {
   namespace        = kubernetes_namespace.arc_systems.metadata[0].name
   create_namespace = false
 
+  values = [
+    yamlencode({
+      tolerations = [
+        {
+          key      = "kubernetes.io/arch"
+          operator = "Equal"
+          value    = "arm64"
+          effect   = "NoSchedule"
+        },
+        {
+          key      = "sandbox.gke.io/runtime"
+          operator = "Equal"
+          value    = "gvisor"
+          effect   = "NoSchedule"
+        }
+      ]
+    })
+  ]
+
   depends_on = [
     google_container_node_pool.arm_sandbox_nodes
   ]
