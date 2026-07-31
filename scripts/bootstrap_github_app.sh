@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Pattern 1: Complete Automated GitHub App Bootstrap for ARC with Polling Wait
+# Pattern 1: Complete Automated GitHub App Bootstrap for ARC
 # ==============================================================================
-# This script generates the RSA key, monitors for GitHub App creation in a loop,
-# populates terraform/terraform.tfvars automatically, and triggers 'terraform apply'.
+# Generates the RSA private key in ~/.ssh/arc-app.pem (chmod 600), monitors for
+# GitHub App creation/installation, populates terraform/terraform.tfvars,
+# and offers interactive in-memory 'terraform apply' execution.
 # ==============================================================================
 
 set -e
 
 KEY_PATH="${HOME}/.ssh/arc-app.pem"
 REPO_TARGET="markdavidmc0/arm-developer-workspace"
+CONTROL_PLANE_REPO="https://github.com/markdavidmc0/arm-ai-control-plane"
 TFVARS_FILE="terraform/terraform.tfvars"
 
 echo "=== 🚀 Starting Automated ARC GitHub App Bootstrap ==="
@@ -50,22 +52,28 @@ check_installations() {
   INSTALL_ID=$(echo "${INSTALLATIONS}" | grep -o '"id":[0-9]*' | head -n1 | cut -d':' -f2 || true)
 }
 
-# 5. Check if App Installation exists, or enter live polling loop
+# 5. Check if App Installation exists, or display detailed instructions and enter live polling loop
 check_installations
 
 if [ -z "${APP_ID}" ] || [ -z "${INSTALL_ID}" ]; then
   echo ""
-  echo "=========================================================="
+  echo "=========================================================================="
   echo "ℹ️  No active GitHub App installation detected for ${REPO_TARGET}."
   echo "   Please create and install the GitHub App in your browser:"
-  echo "   1. Open: https://github.com/settings/apps/new"
-  echo "   2. App Name: arm-control-plane-arc"
-  echo "   3. Homepage URL: https://github.com/markdavidmc0/arm-ai-control-plane"
-  echo "   4. Permissions: Actions (Read-only), Administration (Read & Write)"
-  echo "   5. Install the App on: https://github.com/${REPO_TARGET}"
-  echo "=========================================================="
   echo ""
-  echo "⏳ Waiting for GitHub App creation on GitHub... (Press Ctrl+C to cancel)"
+  echo "   1. Open Creation Page: https://github.com/settings/apps/new"
+  echo "   2. GitHub App name: arm-control-plane-arc"
+  echo "   3. Homepage URL: ${CONTROL_PLANE_REPO}"
+  echo "   4. Webhook Section: Uncheck 'Active' (Webhooks not needed)"
+  echo "   5. Repository Permissions:"
+  echo "      - Actions: Read-only"
+  echo "      - Administration: Read and write"
+  echo "   6. Click 'Create GitHub App' at the bottom."
+  echo "   7. On the new App page, click 'Install App' on left menu."
+  echo "   8. Select 'Only select repositories' -> Choose '${REPO_TARGET}' -> Click 'Install'."
+  echo "=========================================================================="
+  echo ""
+  echo "⏳ Waiting for GitHub App installation to be created on GitHub... (Press Ctrl+C to cancel)"
 
   while [ -z "${APP_ID}" ] || [ -z "${INSTALL_ID}" ]; do
     sleep 3
