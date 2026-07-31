@@ -2,10 +2,6 @@
 # ==============================================================================
 # Pattern 1: Complete Automated GitHub App Bootstrap for ARC
 # ==============================================================================
-# Generates the RSA private key in ~/.ssh/arc-app.pem (chmod 600), monitors for
-# GitHub App creation/installation, populates terraform/terraform.tfvars,
-# and offers interactive in-memory 'terraform apply' execution.
-# ==============================================================================
 
 set -e
 
@@ -19,18 +15,11 @@ echo "=== 🚀 Starting Automated ARC GitHub App Bootstrap ==="
 mkdir -p "${HOME}/.ssh"
 chmod 700 "${HOME}/.ssh"
 
-# 1. Ensure GitHub CLI is installed and authenticated
+# 1. Ensure GitHub CLI is installed
 if ! command -v gh &> /dev/null; then
   echo "❌ Error: GitHub CLI ('gh') is not installed. Install via 'brew install gh'."
   exit 1
 fi
-
-if ! gh auth status &> /dev/null; then
-  echo "🔑 Authenticating with GitHub via interactive OAuth..."
-  gh auth login --scopes "admin:org,repo,admin:repo_hook"
-fi
-
-echo "✅ GitHub CLI authenticated successfully."
 
 # 2. Generate RSA Private Key if not present
 if [ ! -f "${KEY_PATH}" ]; then
@@ -45,50 +34,34 @@ fi
 # 3. Export private key in-memory for Terraform
 export TF_VAR_github_app_private_key="$(cat "${KEY_PATH}")"
 
-# 4. Function to query GitHub App installations via REST API
-check_installations() {
+# 4. Check if IDs are ALREADY saved in terraform/terraform.tfvars
+if [ -f "${TFVARS_FILE}" ]; then
+  APP_ID=$(grep -E '^github_app_id[[:space:]]*=' "${TFVARS_FILE}" | cut -d'=' -f2 | tr -d ' "' || true)
+  INSTALL_ID=$(grep -E '^github_app_installation_id[[:space:]]*=' "${TFVARS_FILE}" | cut -d'=' -f2 | tr -d ' "' || true)
+fi
+
+# 5. If IDs are missing, try gh api or prompt user directly
+if [ -z "${APP_ID}" ] || [ -z "${INSTALL_ID}" ]; then
+  echo "🔍 Querying GitHub for existing App installation..."
   INSTALLATIONS=$(gh api /user/installations 2>/dev/null || echo "[]")
   APP_ID=$(echo "${INSTALLATIONS}" | grep -o '"app_id":[0-9]*' | head -n1 | cut -d':' -f2 || true)
   INSTALL_ID=$(echo "${INSTALLATIONS}" | grep -o '"id":[0-9]*' | head -n1 | cut -d':' -f2 || true)
-}
+fi
 
-# 5. Check if App Installation exists, or display detailed instructions and enter live polling loop
-check_installations
-
+# 6. If still missing, display clear steps and prompt for the IDs once
 if [ -z "${APP_ID}" ] || [ -z "${INSTALL_ID}" ]; then
   echo ""
   echo "=========================================================================="
-  echo "ℹ️  No active GitHub App installation detected for ${REPO_TARGET}."
-  echo "   Please create and install the GitHub App in your browser:"
-  echo ""
-  echo "   1. Open Creation Page: https://github.com/settings/apps/new"
-  echo "   2. GitHub App name: arm-control-plane-arc"
-  echo "   3. Homepage URL: ${CONTROL_PLANE_REPO}"
-  echo "   4. Webhook Section: Uncheck 'Active' (Webhooks not needed)"
-  echo "   5. Repository Permissions:"
-  echo "      - Actions: Read-only"
-  echo "      - Administration: Read and write"
-  echo "   6. Click 'Create GitHub App' at the bottom."
-  echo "   7. On the new App page, click 'Install App' on left menu."
-  echo "   8. Select 'Only select repositories' -> Choose '${REPO_TARGET}' -> Click 'Install'."
+  echo "ℹ️  Existing App IDs not found in 'terraform/terraform.tfvars'."
+  echo "   If you already created your GitHub App:"
+  echo "   1. Find your App ID at: https://github.com/settings/apps"
+  echo "   2. Find your Installation ID at: https://github.com/settings/installations"
   echo "=========================================================================="
   echo ""
-  echo "⏳ Waiting for GitHub App installation to be created on GitHub... (Press Ctrl+C to cancel)"
+  read -p "👉 Enter your GitHub App ID: " APP_ID
+  read -p "👉 Enter your GitHub Installation ID: " INSTALL_ID
 
-  while [ -z "${APP_ID}" ] || [ -z "${INSTALL_ID}" ]; do
-    sleep 3
-    echo -n "."
-    check_installations
-  done
-  echo ""
-fi
-
-# 6. Once App Installation is detected, update terraform/terraform.tfvars!
-echo "✅ Active GitHub App Installation Confirmed!"
-echo "   App ID: ${APP_ID}"
-echo "   Installation ID: ${INSTALL_ID}"
-
-cat <<EOF > "${TFVARS_FILE}"
+  cat <<EOF > "${TFVARS_FILE}"
 project_id                 = "sovereign-ai-495715"
 region                     = "us-central1"
 zone                       = "us-central1-a"
@@ -96,8 +69,12 @@ github_target_repo          = "${REPO_TARGET}"
 github_app_id               = "${APP_ID}"
 github_app_installation_id  = "${INSTALL_ID}"
 EOF
-
-echo "✅ Updated '${TFVARS_FILE}' automatically!"
+  echo "✅ Updated '${TFVARS_FILE}' automatically with App ID ${APP_ID} and Installation ID ${INSTALL_ID}!"
+else
+  echo "✅ Active GitHub App Installation Confirmed!"
+  echo "   App ID: ${APP_ID}"
+  echo "   Installation ID: ${INSTALL_ID}"
+fi
 
 # 7. Offer automatic terraform apply
 echo ""
