@@ -7,6 +7,6 @@ data:
   arm-internal.override: |
     hosts {
       10.8.9.142 keycloak.arm.internal
-      10.8.9.143 gateway.arm.internal
+      10.8.13.109 gateway.arm.internal
       fallthrough
     }
