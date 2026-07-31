@@ -120,12 +120,8 @@ resource "helm_release" "arc_runner_set" {
         spec = {
           hostAliases = [
             {
-              ip        = "10.8.9.142"
-              hostnames = ["keycloak.arm.internal"]
-            },
-            {
-              ip        = "10.8.13.109"
-              hostnames = ["gateway.arm.internal"]
+              ip        = "10.8.12.222"
+              hostnames = ["keycloak.arm.internal", "gateway.arm.internal"]
             }
           ]
           tolerations = [
