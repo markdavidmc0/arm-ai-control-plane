@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Pattern 1: Complete Automated GitHub App Bootstrap for ARC
+# Dual-UX Automated GitHub App Bootstrap for ARC (Desktop & CI/CD)
+# ==============================================================================
+# Supports both:
+# 1. Desktop Developer Mode: Smart .pem key detection from ~/Downloads, interactive prompts,
+#    and optional 'terraform apply'.
+# 2. Non-Interactive CI/CD Mode: Detects $CI / $GITHUB_ACTIONS, reads env vars, and
+#    applies Terraform -auto-approve without keyboard prompts.
 # ==============================================================================
 
 set -e
 
 KEY_PATH="${HOME}/.ssh/arc-app.pem"
 REPO_TARGET="markdavidmc0/arm-developer-workspace"
-CONTROL_PLANE_REPO="https://github.com/markdavidmc0/arm-ai-control-plane"
 TFVARS_FILE="terraform/terraform.tfvars"
 
 echo "=== 🚀 Starting Automated ARC GitHub App Bootstrap ==="
@@ -15,51 +20,51 @@ echo "=== 🚀 Starting Automated ARC GitHub App Bootstrap ==="
 mkdir -p "${HOME}/.ssh"
 chmod 700 "${HOME}/.ssh"
 
-# 1. Ensure GitHub CLI is installed
-if ! command -v gh &> /dev/null; then
-  echo "❌ Error: GitHub CLI ('gh') is not installed. Install via 'brew install gh'."
-  exit 1
-fi
+# ------------------------------------------------------------------------------
+# 1. Smart RSA Key Detection & Setup
+# ------------------------------------------------------------------------------
+# Check if user downloaded a GitHub App private key to ~/Downloads/
+DOWNLOADED_KEY=$(ls -t ${HOME}/Downloads/*.private-key.pem 2>/dev/null | head -n1 || true)
 
-# 2. Generate RSA Private Key if not present
-if [ ! -f "${KEY_PATH}" ]; then
-  echo "🔑 Generating new RSA Private Key for ARC at ${KEY_PATH}..."
+if [ -f "${KEY_PATH}" ]; then
+  echo "🔒 Using existing RSA private key at ${KEY_PATH}"
+elif [ -n "${DOWNLOADED_KEY}" ] && [ -f "${DOWNLOADED_KEY}" ]; then
+  echo "🔑 Detected downloaded GitHub App private key at: ${DOWNLOADED_KEY}"
+  cp "${DOWNLOADED_KEY}" "${KEY_PATH}"
+  chmod 600 "${KEY_PATH}"
+  echo "✅ Copied key to ${KEY_PATH} with secure permissions (chmod 600)."
+else
+  echo "🔑 Generating new RSA Private Key at ${KEY_PATH}..."
   openssl genrsa -out "${KEY_PATH}" 2048
   chmod 600 "${KEY_PATH}"
   echo "✅ Private key generated with strict permissions (chmod 600)."
-else
-  echo "🔒 Using existing RSA private key at ${KEY_PATH}"
 fi
 
-# 3. Export private key in-memory for Terraform
+# Export private key in-memory for Terraform
 export TF_VAR_github_app_private_key="$(cat "${KEY_PATH}")"
 
-# 4. Check if IDs are ALREADY saved in terraform/terraform.tfvars
+# ------------------------------------------------------------------------------
+# 2. Check for Existing App IDs in terraform.tfvars or Environment Variables
+# ------------------------------------------------------------------------------
 if [ -f "${TFVARS_FILE}" ]; then
   APP_ID=$(grep -E '^github_app_id[[:space:]]*=' "${TFVARS_FILE}" | cut -d'=' -f2 | tr -d ' "' || true)
   INSTALL_ID=$(grep -E '^github_app_installation_id[[:space:]]*=' "${TFVARS_FILE}" | cut -d'=' -f2 | tr -d ' "' || true)
 fi
 
-# 5. If IDs are missing, try gh api or prompt user directly
-if [ -z "${APP_ID}" ] || [ -z "${INSTALL_ID}" ]; then
-  echo "🔍 Querying GitHub for existing App installation..."
-  INSTALLATIONS=$(gh api /user/installations 2>/dev/null || echo "[]")
-  APP_ID=$(echo "${INSTALLATIONS}" | grep -o '"app_id":[0-9]*' | head -n1 | cut -d':' -f2 || true)
-  INSTALL_ID=$(echo "${INSTALLATIONS}" | grep -o '"id":[0-9]*' | head -n1 | cut -d':' -f2 || true)
-fi
+# Override from Environment Variables if set (e.g. in CI/CD)
+APP_ID="${TF_VAR_github_app_id:-$APP_ID}"
+INSTALL_ID="${TF_VAR_github_app_installation_id:-$INSTALL_ID}"
 
-# 6. If still missing, display clear steps and prompt for the IDs once
-if [ -z "${APP_ID}" ] || [ -z "${INSTALL_ID}" ]; then
-  echo ""
-  echo "=========================================================================="
-  echo "ℹ️  Existing App IDs not found in 'terraform/terraform.tfvars'."
-  echo "   If you already created your GitHub App:"
-  echo "   1. Find your App ID at: https://github.com/settings/apps"
-  echo "   2. Find your Installation ID at: https://github.com/settings/installations"
-  echo "=========================================================================="
-  echo ""
-  read -p "👉 Enter your GitHub App ID: " APP_ID
-  read -p "👉 Enter your GitHub Installation ID: " INSTALL_ID
+# ------------------------------------------------------------------------------
+# 3. Mode Selection: Headless CI/CD vs. Guided Desktop UX
+# ------------------------------------------------------------------------------
+if [ -n "${CI}" ] || [ -n "${GITHUB_ACTIONS}" ]; then
+  echo "🤖 CI/CD Environment Detected (Non-Interactive Mode)."
+  
+  if [ -z "${APP_ID}" ] || [ -z "${INSTALL_ID}" ]; then
+    echo "❌ Error: 'TF_VAR_github_app_id' and 'TF_VAR_github_app_installation_id' must be set in CI secrets."
+    exit 1
+  fi
 
   cat <<EOF > "${TFVARS_FILE}"
 project_id                 = "sovereign-ai-495715"
@@ -69,14 +74,40 @@ github_target_repo          = "${REPO_TARGET}"
 github_app_id               = "${APP_ID}"
 github_app_installation_id  = "${INSTALL_ID}"
 EOF
-  echo "✅ Updated '${TFVARS_FILE}' automatically with App ID ${APP_ID} and Installation ID ${INSTALL_ID}!"
-else
-  echo "✅ Active GitHub App Installation Confirmed!"
-  echo "   App ID: ${APP_ID}"
-  echo "   Installation ID: ${INSTALL_ID}"
+
+  echo "🚀 Executing non-interactive 'terraform apply -auto-approve'..."
+  cd terraform
+  terraform apply -auto-approve
+  exit 0
 fi
 
-# 7. Offer automatic terraform apply
+# ------------------------------------------------------------------------------
+# 4. Guided Desktop Developer UX
+# ------------------------------------------------------------------------------
+if [ -z "${APP_ID}" ] || [ -z "${INSTALL_ID}" ]; then
+  echo ""
+  echo "=========================================================================="
+  echo "ℹ️  GitHub App IDs not found in 'terraform/terraform.tfvars'."
+  echo "   Find your App ID and Installation ID in your browser:"
+  echo "   1. App ID link: https://github.com/settings/apps"
+  echo "   2. Installation ID link: https://github.com/settings/installations"
+  echo "=========================================================================="
+  echo ""
+  read -p "👉 Enter your GitHub App ID: " APP_ID
+  read -p "👉 Enter your GitHub Installation ID: " INSTALL_ID
+fi
+
+cat <<EOF > "${TFVARS_FILE}"
+project_id                 = "sovereign-ai-495715"
+region                     = "us-central1"
+zone                       = "us-central1-a"
+github_target_repo          = "${REPO_TARGET}"
+github_app_id               = "${APP_ID}"
+github_app_installation_id  = "${INSTALL_ID}"
+EOF
+
+echo "✅ Updated '${TFVARS_FILE}' automatically with App ID ${APP_ID} and Installation ID ${INSTALL_ID}!"
+
 echo ""
 read -p "❓ Do you want to run 'terraform apply' now using the in-memory private key? (y/n) " -n 1 -r
 echo ""
