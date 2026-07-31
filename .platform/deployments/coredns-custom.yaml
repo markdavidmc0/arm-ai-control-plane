@@ -5,8 +5,5 @@ metadata:
   namespace: kube-system
 data:
   arm-internal.override: |
-    hosts {
-      10.8.9.142 keycloak.arm.internal
-      10.8.13.109 gateway.arm.internal
-      fallthrough
-    }
+    rewrite name exact keycloak.arm.internal keycloak-service.default.svc.cluster.local
+    rewrite name exact gateway.arm.internal envoy-edge-guard-service.default.svc.cluster.local
