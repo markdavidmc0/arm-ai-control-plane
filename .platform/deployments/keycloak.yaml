@@ -24,20 +24,29 @@ data:
           "protocol": "openid-connect"
         }
       ],
+      "identityProviders": [
+        {
+          "alias": "github-actions",
+          "displayName": "GitHub Actions OIDC Provider",
+          "providerId": "oidc",
+          "enabled": true,
+          "config": {
+            "jwksUrl": "https://token.actions.githubusercontent.com/.well-known/jwks.json",
+            "issuer": "https://token.actions.githubusercontent.com",
+            "useJwksUrl": "true"
+          }
+        }
+      ],
       "clients": [
         {
           "clientId": "github-ci-runner",
           "name": "GitHub Actions Direct OIDC M2M Client",
+          "secret": "arm-platform-ci-secret-2026",
           "serviceAccountsEnabled": true,
           "standardFlowEnabled": false,
           "directAccessGrantsEnabled": false,
-          "clientAuthenticatorType": "client-jwt",
+          "clientAuthenticatorType": "client-secret",
           "protocol": "openid-connect",
-          "attributes": {
-            "use.jwks.url": "true",
-            "jwks.url": "https://token.actions.githubusercontent.com/.well-known/jwks.json",
-            "token.endpoint.auth.signing.alg": "RS256"
-          },
           "defaultClientScopes": [
             "web-origins",
             "roles",
