@@ -118,6 +118,43 @@ resource "helm_release" "arc_runner_set" {
       }
       template = {
         spec = {
+          containers = [
+            {
+              name    = "runner"
+              image   = "ghcr.io/actions/actions-runner:latest"
+              command = ["/home/runner/run.sh"]
+              env = [
+                {
+                  name  = "SSL_CERT_FILE"
+                  value = "/etc/ssl/certs/internal-arm-tls.crt"
+                },
+                {
+                  name  = "REQUESTS_CA_BUNDLE"
+                  value = "/etc/ssl/certs/internal-arm-tls.crt"
+                },
+                {
+                  name  = "PYTHONHTTPSVERIFY"
+                  value = "0"
+                }
+              ]
+              volumeMounts = [
+                {
+                  name      = "internal-tls"
+                  mountPath = "/etc/ssl/certs/internal-arm-tls.crt"
+                  subPath   = "tls.crt"
+                  readOnly  = true
+                }
+              ]
+            }
+          ]
+          volumes = [
+            {
+              name = "internal-tls"
+              secret = {
+                secretName = "internal-arm-tls"
+              }
+            }
+          ]
           hostAliases = [
             {
               ip        = "10.8.12.222"
