@@ -93,29 +93,14 @@ resource "helm_release" "arc_runner_set" {
     yamlencode({
       template = {
         spec = {
-          tolerations = [
+          hostAliases = [
             {
-              key      = "kubernetes.io/arch"
-              operator = "Equal"
-              value    = "arm64"
-              effect   = "NoSchedule"
+              ip        = "10.8.9.142"
+              hostnames = ["keycloak.arm.internal"]
             },
             {
-              key      = "sandbox.gke.io/runtime"
-              operator = "Equal"
-              value    = "gvisor"
-              effect   = "NoSchedule"
-            }
-          ]
-        }
-      }
-      listenerTemplate = {
-        spec = {
-          containers = [
-            {
-              name    = "listener"
-              image   = "ghcr.io/actions/gha-runner-scale-set-controller:0.8.0"
-              command = ["/ghalistener"]
+              ip        = "10.8.13.109"
+              hostnames = ["gateway.arm.internal"]
             }
           ]
           tolerations = [
