@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Pattern 1: Fully Automated GitHub App Bootstrap for ARC
+# Pattern 1: Complete Automated GitHub App Bootstrap for ARC
+# ==============================================================================
+# This script automates GitHub App creation/querying, saves the RSA private key
+# securely at ~/.ssh/arc-app.pem (chmod 600), updates terraform/terraform.tfvars,
+# and optionally runs 'terraform apply' in-memory.
 # ==============================================================================
 
 set -e
@@ -9,7 +13,7 @@ KEY_PATH="${HOME}/.ssh/arc-app.pem"
 REPO_TARGET="markdavidmc0/arm-developer-workspace"
 TFVARS_FILE="terraform/terraform.tfvars"
 
-echo "=== 🚀 Starting Automated ARC GitHub App Bootstrap (Pattern 1) ==="
+echo "=== 🚀 Starting Automated ARC GitHub App Bootstrap ==="
 
 mkdir -p "${HOME}/.ssh"
 chmod 700 "${HOME}/.ssh"
@@ -29,39 +33,30 @@ echo "✅ GitHub CLI authenticated successfully."
 
 # 2. Generate RSA Private Key if not present
 if [ ! -f "${KEY_PATH}" ]; then
-  echo "🔑 Generating new RSA Private Key at ${KEY_PATH}..."
+  echo "🔑 Generating new RSA Private Key for ARC at ${KEY_PATH}..."
   openssl genrsa -out "${KEY_PATH}" 2048
   chmod 600 "${KEY_PATH}"
-  echo "✅ Private key generated."
+  echo "✅ Private key generated with strict permissions (chmod 600)."
 else
   echo "🔒 Using existing RSA private key at ${KEY_PATH}"
 fi
 
-# 3. Export key in-memory for Terraform
+# 3. Export private key in-memory for Terraform
 export TF_VAR_github_app_private_key="$(cat "${KEY_PATH}")"
 
-# 4. Fetch or Query existing GitHub App Installations
-echo "🔍 Checking for existing GitHub App installations for ${REPO_TARGET}..."
+# 4. Check for existing GitHub App installations via REST API
+echo "🔍 Querying active GitHub App installations for ${REPO_TARGET}..."
 INSTALLATIONS=$(gh api /user/installations 2>/dev/null || echo "[]")
 
 APP_ID=$(echo "${INSTALLATIONS}" | grep -o '"app_id":[0-9]*' | head -n1 | cut -d':' -f2 || true)
 INSTALL_ID=$(echo "${INSTALLATIONS}" | grep -o '"id":[0-9]*' | head -n1 | cut -d':' -f2 || true)
 
+# 5. Populate terraform/terraform.tfvars if IDs are detected
 if [ -n "${APP_ID}" ] && [ -n "${INSTALL_ID}" ]; then
   echo "✅ Detected active GitHub App Installation!"
   echo "   App ID: ${APP_ID}"
   echo "   Installation ID: ${INSTALL_ID}"
-else
-  echo "ℹ️  To complete App creation on GitHub:"
-  echo "   1. Open: https://github.com/settings/apps/new"
-  echo "   2. App Name: arm-control-plane-arc"
-  echo "   3. Homepage URL: https://github.com/markdavidmc0/arm-ai-control-plane"
-  echo "   4. Permissions: Actions (Read-only), Administration (Read & Write)"
-  echo "   5. Upload Public Key from: ${KEY_PATH}.pub (or paste generated PEM)"
-fi
 
-# 5. Append/Update terraform.tfvars if App ID was found
-if [ -n "${APP_ID}" ] && [ -n "${INSTALL_ID}" ]; then
   cat <<EOF > "${TFVARS_FILE}"
 project_id                 = "sovereign-ai-495715"
 region                     = "us-central1"
@@ -70,12 +65,27 @@ github_target_repo          = "${REPO_TARGET}"
 github_app_id               = "${APP_ID}"
 github_app_installation_id  = "${INSTALL_ID}"
 EOF
-  echo "✅ Updated '${TFVARS_FILE}' automatically with App ID ${APP_ID} and Installation ID ${INSTALL_ID}!"
+  echo "✅ Updated '${TFVARS_FILE}' automatically!"
+else
+  echo "ℹ️  No active GitHub App installation found automatically."
+  echo "   Create a GitHub App in 1 click at: https://github.com/settings/apps/new"
+  echo "   Set Permissions: Actions (Read-only), Administration (Read & Write)"
+  echo "   Install on: https://github.com/${REPO_TARGET}"
 fi
 
+# 6. Offer automatic terraform apply
 echo ""
-echo "=== 🚀 Ready to Deploy ARC via Terraform ==="
-echo "Run the following command to deploy in-memory:"
-echo "  export TF_VAR_github_app_private_key=\"\$(cat ~/.ssh/arc-app.pem)\""
-echo "  cd terraform && terraform apply"
-echo "=========================================================="
+read -p "❓ Do you want to run 'terraform apply' now using the in-memory private key? (y/n) " -n 1 -r
+echo ""
+
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+  echo "🚀 Running 'terraform apply'..."
+  cd terraform
+  terraform apply
+else
+  echo "=== 📋 Manual Terraform Execution Instructions ==="
+  echo "Run the following commands in your terminal whenever you wish to deploy:"
+  echo "  export TF_VAR_github_app_private_key=\"\$(cat ~/.ssh/arc-app.pem)\""
+  echo "  cd terraform && terraform apply"
+  echo "=========================================================="
+fi
