@@ -1,0 +1,99 @@
+# --- Actions Runner Controller (ARC) Configuration ---
+
+variable "github_app_id" {
+  type        = string
+  description = "GitHub App ID for ARC runner scaling"
+  default     = ""
+}
+
+variable "github_app_installation_id" {
+  type        = string
+  description = "GitHub App Installation ID for ARC runner scaling"
+  default     = ""
+}
+
+variable "github_app_private_key" {
+  type        = string
+  description = "GitHub App Private Key (PEM format) for ARC runner scaling"
+  default     = ""
+  sensitive   = true
+}
+
+variable "github_target_repo" {
+  type        = string
+  description = "Target GitHub repository for ephemeral runner scale set"
+  default     = "markdavidmc0/arm-developer-workspace"
+}
+
+# Namespace for ARC Controller
+resource "kubernetes_namespace" "arc_systems" {
+  metadata {
+    name = "arc-systems"
+  }
+}
+
+# Namespace for Ephemeral Runner Pods
+resource "kubernetes_namespace" "arc_runners" {
+  metadata {
+    name = "arc-runners"
+  }
+}
+
+# Deploy ARC Scale Set Controller via Official GitHub Helm Chart
+resource "helm_release" "arc_controller" {
+  name             = "arc-controller"
+  repository       = "oci://ghcr.io/actions/actions-runner-controller-charts"
+  chart            = "gha-runner-scale-set-controller"
+  version          = "0.8.0"
+  namespace        = kubernetes_namespace.arc_systems.metadata[0].name
+  create_namespace = false
+
+  depends_on = [
+    google_container_node_pool.arm_sandbox_nodes
+  ]
+}
+
+# Deploy AutoscalingRunnerSet for arm-developer-workspace
+resource "helm_release" "arc_runner_set" {
+  count            = var.github_app_id != "" ? 1 : 0
+  name             = "arm-developer-workspace-runner"
+  repository       = "oci://ghcr.io/actions/actions-runner-controller-charts"
+  chart            = "gha-runner-scale-set"
+  version          = "0.8.0"
+  namespace        = kubernetes_namespace.arc_runners.metadata[0].name
+  create_namespace = false
+
+  set {
+    name  = "githubConfigUrl"
+    value = "https://github.com/${var.github_target_repo}"
+  }
+
+  set {
+    name  = "githubConfigSecret.github_app_id"
+    value = var.github_app_id
+  }
+
+  set {
+    name  = "githubConfigSecret.github_app_installation_id"
+    value = var.github_app_installation_id
+  }
+
+  set {
+    name  = "githubConfigSecret.github_app_private_key"
+    value = var.github_app_private_key
+  }
+
+  set {
+    name  = "minRunners"
+    value = "0"
+  }
+
+  set {
+    name  = "maxRunners"
+    value = "5"
+  }
+
+  depends_on = [
+    helm_release.arc_controller
+  ]
+}

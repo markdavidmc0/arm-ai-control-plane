@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  arm-internal.override: |
+    hosts {
+      10.8.9.142 keycloak.arm.internal
+      10.8.9.143 gateway.arm.internal
+      fallthrough
+    }
