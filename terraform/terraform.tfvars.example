@@ -12,4 +12,11 @@
 project_id = "sovereign-ai-495715"
 region     = "us-central1"
 zone       = "us-central1-a"
-cluster_name = "mvcp-gke-cluster"
+
+# --- Actions Runner Controller (ARC) Registration Token / App ---
+github_target_repo          = "markdavidmc0/arm-developer-workspace"
+# Provide EITHER a Personal Access Token (PAT with repo/admin:org scopes) OR GitHub App credentials:
+github_pat                  = "ghp_YOUR_PERSONAL_ACCESS_TOKEN_HERE"
+github_app_id               = ""
+github_app_installation_id  = ""
+github_app_private_key      = ""

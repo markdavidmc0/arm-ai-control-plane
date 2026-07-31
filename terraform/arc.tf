@@ -1,5 +1,12 @@
 # --- Actions Runner Controller (ARC) Configuration ---
 
+variable "github_pat" {
+  type        = string
+  description = "GitHub Personal Access Token (PAT) for ARC runner scale set registration"
+  default     = ""
+  sensitive   = true
+}
+
 variable "github_app_id" {
   type        = string
   description = "GitHub App ID for ARC runner scaling"
@@ -74,7 +81,7 @@ resource "helm_release" "arc_controller" {
 
 # Deploy AutoscalingRunnerSet for arm-developer-workspace
 resource "helm_release" "arc_runner_set" {
-  count            = var.github_app_id != "" ? 1 : 0
+  count            = (var.github_app_id != "" || var.github_pat != "") ? 1 : 0
   name             = "arm-developer-workspace-runner"
   repository       = "oci://ghcr.io/actions/actions-runner-controller-charts"
   chart            = "gha-runner-scale-set"
@@ -87,19 +94,36 @@ resource "helm_release" "arc_runner_set" {
     value = "https://github.com/${var.github_target_repo}"
   }
 
-  set {
-    name  = "githubConfigSecret.github_app_id"
-    value = var.github_app_id
+  dynamic "set" {
+    for_each = var.github_pat != "" ? [var.github_pat] : []
+    content {
+      name  = "githubConfigSecret.github_token"
+      value = set.value
+    }
   }
 
-  set {
-    name  = "githubConfigSecret.github_app_installation_id"
-    value = var.github_app_installation_id
+  dynamic "set" {
+    for_each = var.github_app_id != "" ? [var.github_app_id] : []
+    content {
+      name  = "githubConfigSecret.github_app_id"
+      value = set.value
+    }
   }
 
-  set {
-    name  = "githubConfigSecret.github_app_private_key"
-    value = var.github_app_private_key
+  dynamic "set" {
+    for_each = var.github_app_installation_id != "" ? [var.github_app_installation_id] : []
+    content {
+      name  = "githubConfigSecret.github_app_installation_id"
+      value = set.value
+    }
+  }
+
+  dynamic "set" {
+    for_each = var.github_app_private_key != "" ? [var.github_app_private_key] : []
+    content {
+      name  = "githubConfigSecret.github_app_private_key"
+      value = set.value
+    }
   }
 
   set {
