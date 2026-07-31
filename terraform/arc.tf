@@ -131,10 +131,6 @@ resource "helm_release" "arc_runner_set" {
                 {
                   name  = "REQUESTS_CA_BUNDLE"
                   value = "/etc/ssl/certs/internal-arm-tls.crt"
-                },
-                {
-                  name  = "PYTHONHTTPSVERIFY"
-                  value = "0"
                 }
               ]
               volumeMounts = [
