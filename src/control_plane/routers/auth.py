@@ -9,6 +9,8 @@ import json
 import time
 from typing import Any
 from fastapi import APIRouter, Body, Form, Header, Request, Response, status
+from pydantic import BaseModel
+from src.control_plane.services.auth_service import AuthService
 
 router = APIRouter(tags=["Zero-Trust Auth Guard & Keycloak OIDC"])
 auth_service = AuthService()
