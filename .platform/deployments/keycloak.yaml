@@ -31,21 +31,31 @@ data:
           "providerId": "oidc",
           "enabled": true,
           "config": {
-            "jwksUrl": "https://token.actions.githubusercontent.com/.well-known/jwks.json",
             "issuer": "https://token.actions.githubusercontent.com",
+            "jwksUrl": "https://token.actions.githubusercontent.com/.well-known/jwks.json",
             "useJwksUrl": "true"
+          }
+        }
+      ],
+      "identityProviderMappers": [
+        {
+          "name": "repository-claim-mapper",
+          "identityProviderAlias": "github-actions",
+          "identityProviderMapper": "oidc-user-attribute-idp-mapper",
+          "config": {
+            "claim": "repository",
+            "user.attribute": "repository"
           }
         }
       ],
       "clients": [
         {
           "clientId": "github-ci-runner",
-          "name": "GitHub Actions Direct OIDC M2M Client",
-          "secret": "arm-platform-ci-secret-2026",
+          "name": "GitHub Actions Secretless OIDC M2M Client",
+          "publicClient": true,
           "serviceAccountsEnabled": true,
-          "standardFlowEnabled": false,
-          "directAccessGrantsEnabled": false,
-          "clientAuthenticatorType": "client-secret",
+          "standardFlowEnabled": true,
+          "directAccessGrantsEnabled": true,
           "protocol": "openid-connect",
           "defaultClientScopes": [
             "web-origins",
@@ -86,7 +96,7 @@ spec:
       containers:
       - name: keycloak
         image: quay.io/keycloak/keycloak:24.0.0
-        args: ["start-dev", "--import-realm"]
+        args: ["start-dev", "--import-realm", "--features=token-exchange"]
         env:
         - name: KEYCLOAK_ADMIN
           value: "admin"
@@ -101,11 +111,11 @@ spec:
           mountPath: /opt/keycloak/data/import
         resources:
           requests:
-            cpu: "100m"
-            memory: "256Mi"
+            cpu: "200m"
+            memory: "512Mi"
           limits:
             cpu: "1000m"
-            memory: "1024Mi"
+            memory: "2048Mi"
       volumes:
       - name: realm-config-volume
         configMap:
