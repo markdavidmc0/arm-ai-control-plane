@@ -7,9 +7,8 @@ and `/realms/arm-platform/protocol/openid-connect/token` for Keycloak M2M OAuth2
 import base64
 import json
 import time
-from fastapi import APIRouter, Form, Header, Request, Response, status
-from pydantic import BaseModel
-from src.control_plane.services.auth_service import AuthService
+from typing import Any
+from fastapi import APIRouter, Body, Form, Header, Request, Response, status
 
 router = APIRouter(tags=["Zero-Trust Auth Guard & Keycloak OIDC"])
 auth_service = AuthService()
@@ -21,12 +20,20 @@ class TokenRequest(BaseModel):
     client_secret: str | None = None
 
 
-@router.get("/api/v1/internal/auth-check")
+@router.api_route("/api/v1/internal/auth-check", methods=["GET", "POST"])
+@router.api_route("/api/v1/internal/auth-check/{full_path:path}", methods=["GET", "POST"])
 async def envoy_ext_authz_check(
+    request: Request,
     response: Response,
+    body: Any = Body(None),
     x_judge_api_key: str | None = Header(None, alias="x-judge-api-key"),
     authorization: str | None = Header(None, alias="authorization"),
 ):
+    # Consume any partial body stream forwarded by Envoy ext_authz
+    try:
+        await request.body()
+    except Exception:
+        pass
     """Sidecar authentication check endpoint called by Envoy proxy.
 
     Returns:

@@ -32,11 +32,13 @@ data:
               - name: envoy.filters.http.ext_authz
                 typed_config:
                   "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+                  transport_api_version: V3
                   http_service:
                     server_uri:
                       cluster: gateway_service
-                      timeout: 0.25s
+                      timeout: 2.0s
                       uri: http://mvcp-gateway-service:8000/api/v1/internal/auth-check
+                    path_prefix: /api/v1/internal/auth-check
                     authorization_request:
                       allowed_headers:
                         patterns:
