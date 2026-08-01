@@ -79,26 +79,51 @@ async def keycloak_token_endpoint(
     grant_type: str = Form("client_credentials"),
     client_id: str | None = Form(None),
     client_secret: str | None = Form(None),
+    subject_token: str | None = Form(None),
+    subject_token_type: str | None = Form(None),
+    subject_issuer: str | None = Form(None),
+    client_assertion: str | None = Form(None),
+    client_assertion_type: str | None = Form(None),
 ):
-    """Keycloak M2M OAuth2 Token Endpoint returning JWT access tokens."""
-    # Handle JSON payload fallback if form-data is not sent
-    if not client_id or not client_secret:
+    """Keycloak M2M OAuth2 Token Endpoint returning JWT access tokens.
+    Supports secretless GitHub Actions OIDC exchange and Client JWT assertions.
+    """
+    # Parse JSON body if request is sent as application/json
+    try:
+        body = await request.json()
+        grant_type = body.get("grant_type", grant_type)
+        client_id = body.get("client_id", client_id)
+        client_secret = body.get("client_secret", client_secret)
+        subject_token = body.get("subject_token", subject_token)
+        client_assertion = body.get("client_assertion", client_assertion)
+    except Exception:
+        pass
+
+    oidc_token = subject_token or client_assertion
+
+    # Secretless OIDC Validation Path
+    is_secretless_authenticated = False
+    if oidc_token and oidc_token.count(".") == 2:
         try:
-            body = await request.json()
-            grant_type = body.get("grant_type", grant_type)
-            client_id = body.get("client_id", client_id)
-            client_secret = body.get("client_secret", client_secret)
+            parts = oidc_token.split(".")
+            padding = "=" * (4 - (len(parts[1]) % 4))
+            payload = json.loads(base64.urlsafe_b64decode(parts[1] + padding).decode("utf-8"))
+            iss = payload.get("iss", "")
+            sub = payload.get("sub", "")
+            repo = payload.get("repository", "")
+
+            if "token.actions.githubusercontent.com" in iss and ("markdavidmc0/arm-developer-workspace" in repo or "markdavidmc0/arm-developer-workspace" in sub):
+                is_secretless_authenticated = True
         except Exception:
             pass
 
-    if grant_type != "client_credentials":
-        response.status_code = status.HTTP_400_BAD_REQUEST
-        return {"error": "unsupported_grant_type", "error_description": "Only client_credentials grant type is supported."}
-
+    # Secret Fallback Path
     valid_secret = client_secret in ["mcp_ci_runner_secret_2026", "arm_m2m_client_secret_stub_2026"]
-    if client_id != "github-ci-runner" or not valid_secret:
+    is_secret_authenticated = (client_id == "github-ci-runner" and valid_secret)
+
+    if not is_secretless_authenticated and not is_secret_authenticated:
         response.status_code = status.HTTP_401_UNAUTHORIZED
-        return {"error": "invalid_client", "error_description": "Invalid client_id or client_secret"}
+        return {"error": "invalid_client", "error_description": "Invalid OIDC Token, client_id, or client_secret"}
 
     now = int(time.time())
     exp = now + 900  # 15 minutes lifespan
@@ -111,7 +136,7 @@ async def keycloak_token_endpoint(
         "sub": "service-account-github-ci-runner",
         "azp": "github-ci-runner",
         "client_id": "github-ci-runner",
-        "grant_type": "client_credentials",
+        "grant_type": grant_type,
         "scope": "tools:register profile email",
         "realm_access": {"roles": ["mcp-registrar", "default-roles-arm-platform"]},
     }

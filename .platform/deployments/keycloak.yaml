@@ -34,7 +34,8 @@ data:
             "issuer": "https://token.actions.githubusercontent.com",
             "jwksUrl": "https://token.actions.githubusercontent.com/.well-known/jwks.json",
             "useJwksUrl": "true",
-            "tokenExchangeSupported": "true"
+            "tokenExchangeSupported": "true",
+            "permissions.enabled": "true"
           }
         }
       ],
@@ -66,7 +67,9 @@ data:
           "serviceAccountClientId": "github-ci-runner",
           "clientRoles": {
             "realm-management": [
-              "token-exchange"
+              "token-exchange",
+              "manage-identity-providers",
+              "view-identity-providers"
             ]
           },
           "realmRoles": [
@@ -78,6 +81,7 @@ data:
         {
           "clientId": "github-ci-runner",
           "name": "GitHub Actions Secretless OIDC M2M Client",
+          "publicClient": false,
           "serviceAccountsEnabled": true,
           "standardFlowEnabled": false,
           "directAccessGrantsEnabled": false,
@@ -86,8 +90,6 @@ data:
           "attributes": {
             "use.jwks.url": "true",
             "jwks.url": "https://token.actions.githubusercontent.com/.well-known/jwks.json",
-            "jwt.cred.issuer": "https://token.actions.githubusercontent.com",
-            "jwt.cred.subject": "repo:markdavidmc0/arm-developer-workspace:ref:refs/heads/main",
             "token.endpoint.auth.signing.alg": "RS256"
           },
           "defaultClientScopes": [
