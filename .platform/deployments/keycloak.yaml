@@ -33,7 +33,8 @@ data:
           "config": {
             "issuer": "https://token.actions.githubusercontent.com",
             "jwksUrl": "https://token.actions.githubusercontent.com/.well-known/jwks.json",
-            "useJwksUrl": "true"
+            "useJwksUrl": "true",
+            "permissions.enabled": "true"
           }
         }
       ],
@@ -52,10 +53,12 @@ data:
         {
           "clientId": "github-ci-runner",
           "name": "GitHub Actions Secretless OIDC M2M Client",
-          "publicClient": true,
+          "secret": "arm-platform-ci-secret-2026",
+          "publicClient": false,
           "serviceAccountsEnabled": true,
           "standardFlowEnabled": true,
           "directAccessGrantsEnabled": true,
+          "clientAuthenticatorType": "client-secret",
           "protocol": "openid-connect",
           "defaultClientScopes": [
             "web-origins",
@@ -96,7 +99,7 @@ spec:
       containers:
       - name: keycloak
         image: quay.io/keycloak/keycloak:24.0.0
-        args: ["start-dev", "--import-realm", "--features=token-exchange"]
+        args: ["start-dev", "--import-realm", "--features=admin-fine-grained-authz,token-exchange"]
         env:
         - name: KEYCLOAK_ADMIN
           value: "admin"
