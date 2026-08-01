@@ -5,5 +5,5 @@ metadata:
   namespace: kube-system
 data:
   arm-internal.override: |
-    rewrite name exact keycloak.arm.internal keycloak-service.default.svc.cluster.local
+    rewrite name exact keycloak.arm.internal internal-https-service.default.svc.cluster.local
     rewrite name exact gateway.arm.internal envoy-edge-guard-service.default.svc.cluster.local
