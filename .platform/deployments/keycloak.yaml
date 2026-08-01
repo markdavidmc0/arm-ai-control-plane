@@ -49,10 +49,12 @@ data:
           }
         },
         {
-          "name": "mcp-registrar-role-mapper",
+          "name": "workspace-repo-role-mapper",
           "identityProviderAlias": "github-actions",
-          "identityProviderMapper": "oidc-hardcoded-role-idp-mapper",
+          "identityProviderMapper": "oidc-role-idp-mapper",
           "config": {
+            "claim": "repository",
+            "claim.value": "markdavidmc0/arm-developer-workspace",
             "role": "mcp-registrar"
           }
         }
