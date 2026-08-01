@@ -47,18 +47,24 @@ data:
             "claim": "repository",
             "user.attribute": "repository"
           }
+        },
+        {
+          "name": "mcp-registrar-role-mapper",
+          "identityProviderAlias": "github-actions",
+          "identityProviderMapper": "oidc-hardcoded-role-idp-mapper",
+          "config": {
+            "role": "mcp-registrar"
+          }
         }
       ],
       "clients": [
         {
           "clientId": "github-ci-runner",
           "name": "GitHub Actions Secretless OIDC M2M Client",
-          "secret": "arm-platform-ci-secret-2026",
-          "publicClient": false,
+          "publicClient": true,
           "serviceAccountsEnabled": true,
           "standardFlowEnabled": true,
           "directAccessGrantsEnabled": true,
-          "clientAuthenticatorType": "client-secret",
           "protocol": "openid-connect",
           "defaultClientScopes": [
             "web-origins",
