@@ -59,15 +59,37 @@ data:
           }
         }
       ],
+      "users": [
+        {
+          "username": "service-account-github-ci-runner",
+          "enabled": true,
+          "serviceAccountClientId": "github-ci-runner",
+          "clientRoles": {
+            "realm-management": [
+              "token-exchange"
+            ]
+          },
+          "realmRoles": [
+            "mcp-registrar"
+          ]
+        }
+      ],
       "clients": [
         {
           "clientId": "github-ci-runner",
           "name": "GitHub Actions Secretless OIDC M2M Client",
-          "publicClient": true,
           "serviceAccountsEnabled": true,
-          "standardFlowEnabled": true,
-          "directAccessGrantsEnabled": true,
+          "standardFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "clientAuthenticatorType": "client-jwt",
           "protocol": "openid-connect",
+          "attributes": {
+            "use.jwks.url": "true",
+            "jwks.url": "https://token.actions.githubusercontent.com/.well-known/jwks.json",
+            "jwt.cred.issuer": "https://token.actions.githubusercontent.com",
+            "jwt.cred.subject": "repo:markdavidmc0/arm-developer-workspace:ref:refs/heads/main",
+            "token.endpoint.auth.signing.alg": "RS256"
+          },
           "defaultClientScopes": [
             "web-origins",
             "roles",
@@ -107,7 +129,7 @@ spec:
       containers:
       - name: keycloak
         image: quay.io/keycloak/keycloak:24.0.0
-        args: ["start-dev", "--import-realm", "--features=admin-fine-grained-authz,token-exchange"]
+        args: ["start-dev", "--import-realm", "--features=token-exchange"]
         env:
         - name: KEYCLOAK_ADMIN
           value: "admin"
