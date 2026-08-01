@@ -156,13 +156,25 @@ class AuthService:
                 logger.warning(f"JWT token expired at {exp}")
                 return None
 
-            # 2. Verify Issuer
+            # 2. Verify Issuer / OIDC Workload Identity Claims
             iss = payload.get("iss", "")
-            if "arm-platform" not in iss:
-                logger.warning(f"Invalid JWT issuer: {iss}")
+            sub = payload.get("sub", "")
+            repo = payload.get("repository", "")
+
+            is_github_oidc = (
+                "token.actions.githubusercontent.com" in iss
+                and ("markdavidmc0/arm-developer-workspace" in repo or "markdavidmc0/arm-developer-workspace" in sub)
+            )
+            is_keycloak_jwt = "arm-platform" in iss or "keycloak" in iss
+
+            if not is_github_oidc and not is_keycloak_jwt:
+                logger.warning(f"Invalid JWT issuer or repository claims: {iss} | repo: {repo}")
                 return None
 
-            # 3. Verify Client ID / Roles / Scopes
+            if is_github_oidc:
+                return payload
+
+            # 3. Verify Keycloak Client ID / Roles / Scopes
             client_id = payload.get("azp") or payload.get("client_id")
             roles = payload.get("realm_access", {}).get("roles", [])
             scope = payload.get("scope", "")
