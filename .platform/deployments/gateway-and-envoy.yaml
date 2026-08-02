@@ -108,6 +108,8 @@ spec:
         env:
         - name: PORT
           value: "8000"
+        - name: ALLOW_NATIVE_BENCHMARKS
+          value: "true"
         resources:
           requests:
             cpu: "100m"

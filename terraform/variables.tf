@@ -20,3 +20,9 @@ variable "cluster_name" {
   description = "The name of the GKE Cluster."
   default     = "mvcp-gke-cluster"
 }
+
+variable "enable_native_benchmark_pool" {
+  type        = bool
+  description = "Controls whether the optional native runc Arm node pool is provisioned for A/B benchmarking."
+  default     = true
+}

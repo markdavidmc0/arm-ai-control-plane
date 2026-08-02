@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "logfire-instrumentation": {
+      "source": "pydantic/skills",
+      "sourceType": "github",
+      "skillPath": "skills/logfire-instrumentation/SKILL.md",
+      "computedHash": "f34ee81f4595472fc8eea0d479259c093b98b371d2a0a30d6bd5252ebeaff635"
+    }
+  }
+}

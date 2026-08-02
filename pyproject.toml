@@ -10,6 +10,7 @@ dependencies = [
     "pydantic>=2.6.0",
     "mcp>=1.28.1",
     "fastmcp>=3.4.4",
+    "logfire[system-metrics]>=4.39.0",
 ]
 
 [dependency-groups]

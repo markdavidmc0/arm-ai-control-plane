@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.control_plane.mcp_server import MCPServer
 from src.control_plane.orchestrator import SandboxOrchestrator
@@ -60,6 +60,8 @@ class OptimizationRequest(BaseModel):
     """Data model representing a kernel optimization request."""
 
     code: str
+    use_gvisor: bool = Field(True, description="Enforce gVisor runsc sandbox isolation")
+    execution_mode: str = Field("codemode", description="Execution mode slug: 'codemode' or 'direct'")
 
 
 class OptimizationResponse(BaseModel):
@@ -70,7 +72,9 @@ class OptimizationResponse(BaseModel):
     message: str
 
 
-async def execute_optimization_task(task_id: str, code: str):
+async def execute_optimization_task(
+    task_id: str, code: str, use_gvisor: bool = True, execution_mode: str = "codemode"
+):
     """Background worker that invokes the sandboxed GKE execution engine.
 
     Coordinates task phase updates within `tasks_db`, launches the GKE-sandboxed
@@ -79,11 +83,15 @@ async def execute_optimization_task(task_id: str, code: str):
     Args:
         task_id: Unique task identifier.
         code: The C++ source code to compile.
+        use_gvisor: Whether to enforce gVisor sandbox isolation.
+        execution_mode: Execution mode slug ('codemode' or 'direct').
     """
     tasks_db[task_id]["status"] = "running"
     try:
-        # Launch GKE gVisor sandbox run
-        profile_results = await orchestrator.optimize_and_profile(task_id, code)
+        # Launch GKE sandbox/native run
+        profile_results = await orchestrator.optimize_and_profile(
+            task_id, code, use_gvisor=use_gvisor, execution_mode=execution_mode
+        )
 
         # Translate raw JSON profile into structured Heatmap payload
         visual_payload = mcp_server.translate_profile_to_heatmap(profile_results)
@@ -117,7 +125,9 @@ async def trigger_optimize(request: OptimizationRequest, background_tasks: Backg
     vectorization efficiency.
     """
     task_id = str(uuid.uuid4())
-    logger.info(f"Received optimization request. Provisioning task_id: {task_id}")
+    logger.info(
+        f"Received optimization request. Provisioning task_id: {task_id} (gvisor={request.use_gvisor}, mode={request.execution_mode})"
+    )
 
     tasks_db[task_id] = {
         "task_id": task_id,
@@ -126,7 +136,13 @@ async def trigger_optimize(request: OptimizationRequest, background_tasks: Backg
         "results": None,
     }
 
-    background_tasks.add_task(execute_optimization_task, task_id, request.code)
+    background_tasks.add_task(
+        execute_optimization_task,
+        task_id,
+        request.code,
+        use_gvisor=request.use_gvisor,
+        execution_mode=request.execution_mode,
+    )
 
     return OptimizationResponse(
         task_id=task_id,

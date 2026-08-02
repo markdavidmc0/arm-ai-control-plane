@@ -172,6 +172,48 @@ resource "google_container_node_pool" "arm_sandbox_nodes" {
   }
 }
 
+# --- Native Arm Tau T2A Node Pool (No gVisor - Native runc Baseline) ---
+
+resource "google_container_node_pool" "arm_native_nodes" {
+  count      = var.enable_native_benchmark_pool ? 1 : 0
+  provider   = google-beta
+  name       = "arm-native-node-pool"
+  location   = var.zone
+  cluster    = google_container_cluster.primary.name
+  node_count = 2
+
+  node_config {
+    machine_type    = "t2a-standard-4" # Identical Arm Tau T2A processor (64-bit Armv8.2-A)
+    image_type      = "COS_CONTAINERD" # Container-Optimized OS with containerd
+    service_account = google_service_account.gke_nodes.email
+
+    # NO sandbox_config HERE -> Direct runc container execution
+
+    workload_metadata_config {
+      mode = "GKE_METADATA"
+    }
+
+    oauth_scopes = [
+      "https://www.googleapis.com/auth/cloud-platform"
+    ]
+
+    metadata = {
+      disable-legacy-endpoints = "true"
+    }
+
+    labels = {
+      "mvcp.ai/node-type" = "arm-native-baseline"
+    }
+
+    tags = ["gke-node"]
+  }
+
+  management {
+    auto_repair  = true
+    auto_upgrade = true
+  }
+}
+
 # --- Cloud DNS Private Managed Zone for arm.internal ---
 resource "google_dns_managed_zone" "arm_internal" {
   name        = "arm-internal-zone"
