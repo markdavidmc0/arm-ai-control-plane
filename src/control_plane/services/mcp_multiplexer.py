@@ -237,3 +237,33 @@ class MCPMultiplexerService:
             logger.info(f"Persisted updated MCP registry to {self.registry_path}")
         except Exception as e:
             logger.error(f"Failed to persist MCP registry to {self.registry_path}: {e}")
+
+    def build_deferred_mcp_toolset(self, domain: str | None = None) -> Any:
+        """Wraps registered MCP tools into a deferred FunctionToolset.
+
+        Tools remain outside the initial run_code prompt until queried via Tool Search.
+        Applies metadata tagging (.with_metadata(code_mode=True)).
+
+        Args:
+            domain: Optional domain filter slug.
+
+        Returns:
+            Deferred FunctionToolset or tool dictionary list.
+        """
+        all_tools = self.get_sliced_tools(domain)
+        logger.info(f"Building deferred MCP toolset with {len(all_tools)} tools (defer_loading=True)")
+
+        try:
+            from pydantic_ai_harness.tools import FunctionToolset
+            toolset = FunctionToolset(
+                tools=all_tools,
+                defer_loading=True  # Keeps tools hidden until explicit search discovery
+            ).with_metadata(code_mode=True)
+            return toolset
+        except ImportError:
+            # Fallback wrapper dictionary when harness package is running in simulation mode
+            return {
+                "tools": all_tools,
+                "defer_loading": True,
+                "metadata": {"code_mode": True}
+            }

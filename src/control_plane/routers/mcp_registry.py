@@ -159,15 +159,7 @@ async def execute_tool_call(req: ToolCallRequest):
         )
         return result
     else:
-        return {
-            "jsonrpc": "2.0",
-            "result": {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"Executed tool [{req.name}] locally on Arm Control Plane Gateway.",
-                    }
-                ],
-                "status": "SUCCESS",
-            },
-        }
+        # Route local tool call to Data Plane Subprocess Dispatcher
+        from src.data_plane.worker.tool_dispatcher import LocalToolDispatcher
+        dispatcher = LocalToolDispatcher()
+        return await dispatcher.dispatch_tool_call(req.name, req.arguments)

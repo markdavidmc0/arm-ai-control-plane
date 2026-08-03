@@ -11,6 +11,8 @@ dependencies = [
     "mcp>=1.28.1",
     "fastmcp>=3.4.4",
     "logfire[system-metrics]>=4.39.0",
+    "pydantic-ai>=0.0.20",
+    "pydantic-ai-harness[codemode]>=0.1.0",
 ]
 
 [dependency-groups]

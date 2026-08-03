@@ -101,6 +101,19 @@ class SandboxOrchestrator:
                 "kubernetes.io/arch": "arm64",
                 "mvcp.ai/node-type": target_node_label,
             },
+            "volumes": [
+                {"name": "tools-volume", "emptyDir": {}}
+            ],
+            "initContainers": [
+                {
+                    "name": "tools-installer",
+                    "image": "us-central1-docker.pkg.dev/sovereign-ai-495715/mcp-tools/arm-workspace-tools:latest",
+                    "command": ["sh", "-c", "cp -r /workspace/mcp_tools/* /opt/arm-tools/ || true"],
+                    "volumeMounts": [
+                        {"name": "tools-volume", "mountPath": "/opt/arm-tools/"}
+                    ],
+                }
+            ],
             "containers": [
                 {
                     "name": "compiler-sandbox",
@@ -121,6 +134,13 @@ class SandboxOrchestrator:
                             },
                         },
                         {"name": "TASK_ID", "value": task_id},
+                    ],
+                    "volumeMounts": [
+                        {
+                            "name": "tools-volume",
+                            "mountPath": "/opt/arm-tools/",
+                            "readOnly": True,
+                        }
                     ],
                     "resources": {
                         "limits": {"cpu": "2", "memory": "2Gi"},
