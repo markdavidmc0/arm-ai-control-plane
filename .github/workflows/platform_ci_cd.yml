@@ -28,11 +28,49 @@ jobs:
       - name: Run Pytest Test Suite
         run: |
           uv sync
-          uv run pytest
+          uv run pytest -m "not kind"
+
+  kind-e2e-test:
+    name: E2E Kind Kubernetes Integration Tests
+    needs: test-and-validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv Package Manager
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Create multi-node-pool kind Kubernetes Cluster
+        uses: helm/kind-action@v1.10.0
+        with:
+          cluster_name: kind-e2e-cluster
+          config: .platform/deployments/kind-config.yaml
+
+      - name: Apply Platform Kubernetes & Envoy Manifests
+        run: |
+          kubectl apply -f .platform/deployments/gateway-and-envoy.yaml
+          kubectl apply -f .platform/deployments/in-house-mcp-servers.yaml
+          kubectl rollout status deployment/mvcp-gateway-deployment --timeout=120s || true
+
+      - name: Run E2E Kind Integration Tests
+        env:
+          E2E_TARGET: kind
+        run: |
+          uv sync
+          uv run pytest tests/test_e2e_platform.py -v
 
   build-and-deploy:
     name: Build Container Images & Trigger Kubernetes Rolling Update
-    needs: test-and-validate
+    needs: [test-and-validate, kind-e2e-test]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
 

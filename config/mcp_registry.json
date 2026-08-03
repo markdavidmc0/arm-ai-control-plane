@@ -2,21 +2,31 @@
   "base_tools": [
     {
       "name": "mcp__search_tools",
-      "description": "Lazy-loaded meta-tool. Allows agents to discover and fetch full schemas for unlisted tools on-demand without paying an upfront prompt token tax.",
+      "description": "Lazy-loaded meta-tool. Search for unlisted tools on-demand.",
       "parameters": {
         "type": "object",
         "properties": {
           "query": {
-            "type": "string",
-            "description": "Search query keywords (e.g., 'bandwidth', 'sve', 'assembly')"
-          },
-          "domain": {
-            "type": "string",
-            "description": "Optional domain filter (e.g., 'physical-ai', 'cloud-ai', 'mobile-ai')"
+            "type": "string"
           }
         },
         "required": [
           "query"
+        ]
+      }
+    },
+    {
+      "name": "optimize_kernel",
+      "description": "Cross-compiles and optimizes kernel code within a sandboxed data plane.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
         ]
       }
     },

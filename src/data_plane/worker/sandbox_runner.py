@@ -61,22 +61,45 @@ class DataPlaneSandboxRunner:
 
         try:
             async with asyncio.timeout(self.timeout_seconds):
-                # Execute Python snippet
-                exec(code_snippet, exec_globals, exec_locals)
+                # Wrap execution payload inside an async entry harness to support top-level await
+                indented_code = "\n".join(f"    {line}" for line in code_snippet.splitlines())
+                wrapped_code = (
+                    "async def __code_mode_entry__():\n"
+                    f"{indented_code}\n"
+                    "    return {k: v for k, v in locals().items() if not k.startswith('__')}\n"
+                )
 
-                # Capture updated variables and state for multi-turn persistence
+                # Execute Python snippet harness
+                exec(wrapped_code, exec_globals, exec_locals)
+                entry_fn = exec_locals["__code_mode_entry__"]
+                res = await entry_fn()
+
+                # Record local variables defined inside __code_mode_entry__ back into current_repl_state
+                if isinstance(res, dict):
+                    for k, v in res.items():
+                        if not k.startswith("__"):
+                            current_repl_state[k] = v
+
                 for k, v in exec_locals.items():
-                    if not k.startswith("__"):
+                    if not k.startswith("__") and k != "__code_mode_entry__":
                         current_repl_state[k] = v
 
                 duration_ms = round((time.time() - start_time) * 1000.0, 2)
-                output_val = exec_locals.get("result", exec_locals.get("output", "Execution completed successfully."))
+                output_val = current_repl_state.get(
+                    "result",
+                    current_repl_state.get(
+                        "output",
+                        res if not isinstance(res, dict) else "Execution completed successfully.",
+                    ),
+                )
 
                 # If result is an unawaited coroutine or async function, await it
                 if asyncio.iscoroutine(output_val):
                     output_val = await output_val
+                    current_repl_state["result"] = output_val
                 elif callable(output_val) and asyncio.iscoroutinefunction(output_val):
                     output_val = await output_val()
+                    current_repl_state["result"] = output_val
 
                 return {
                     "status": "success",
@@ -88,7 +111,9 @@ class DataPlaneSandboxRunner:
                 }
 
         except TimeoutError:
-            logger.error(f"[Data Plane] CodeMode execution timed out after {self.timeout_seconds}s.")
+            logger.error(
+                f"[Data Plane] CodeMode execution timed out after {self.timeout_seconds}s."
+            )
             return {
                 "status": "error",
                 "error": f"Execution timed out after {self.timeout_seconds}s.",

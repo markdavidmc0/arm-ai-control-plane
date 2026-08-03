@@ -25,6 +25,12 @@ This document establishes mandatory coding standards, architectural patterns, an
   * Run tests: `uv run pytest`
 * **Linting & Formatting:** Run `uv run ruff check` and `uv run ruff format` to ensure strict PEP 8 and code-quality compliance.
 * **Static Type Checking:** Run `uv run ty check` for static type verification. All production functions must include explicit type annotations for parameters and return values.
+* **Strict Pydantic API Schemas (`schemas.py`):**
+  - All FastAPI request and response payloads MUST use explicit Pydantic `BaseModel` subclasses in `src/control_plane/schemas.py`.
+  - **Never** use untyped raw `dict` objects or manual `await request.json()` parsing in API handlers.
+  - Maintain a clean architectural separation:
+    - **`schemas.py`**: External API Data Transfer Objects (DTOs) and request/response contracts (`MCPJsonRPCRequest`, `MCPJsonRPCResponse`).
+    - **`types.py`**: Internal domain models, dependency injection containers (`ArmPlatformDeps`), and system type aliases.
 
 ---
 

@@ -27,60 +27,97 @@ class MCPMultiplexerService:
         self.reload_registry()
 
     def reload_registry(self) -> None:
-        """Loads tool schemas and upstream servers from config/mcp_registry.json."""
+        """Loads tool schemas dynamically from Data Plane catalog and config/mcp_registry.json."""
+        self.base_tools = self._load_dataplane_catalog()
+        self.domain_tools = {}
+        self.upstream_servers = {}
+
         if os.path.exists(self.registry_path):
             try:
-                with open(self.registry_path, "r", encoding="utf-8") as f:
+                with open(self.registry_path, encoding="utf-8") as f:
                     data = json.load(f)
-                    self.base_tools = data.get("base_tools", [])
+                    loaded_base = data.get("base_tools", [])
+                    for t in loaded_base:
+                        if t.get("name") not in [bt.get("name") for bt in self.base_tools]:
+                            self.base_tools.append(t)
                     self.domain_tools = data.get("domain_tools", {})
                     self.upstream_servers = data.get("upstream_servers", {})
                 logger.info(
-                    f"Loaded MCP registry with {len(self.base_tools)} base tools, {len(self.domain_tools)} domains, and {len(self.upstream_servers)} upstream servers."
+                    f"Loaded MCP registry with {len(self.base_tools)} base tools, "
+                    f"{len(self.domain_tools)} domains, and {len(self.upstream_servers)} upstream servers."
                 )
             except Exception as e:
                 logger.error(f"Failed to load MCP registry from {self.registry_path}: {e}")
-        else:
-            logger.warning(
-                f"MCP registry file not found at {self.registry_path}. Using internal defaults."
-            )
-            self._set_default_registry()
 
-    def _set_default_registry(self) -> None:
-        """Sets internal default tools if registry JSON is missing."""
-        self.base_tools = [
-            {
-                "name": "mcp__search_tools",
-                "description": "Lazy-loaded meta-tool. Search for unlisted tools on-demand.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"query": {"type": "string"}},
-                    "required": ["query"],
-                },
+    def _load_dataplane_catalog(self) -> list[dict[str, Any]]:
+        """Dynamically loads tool entries from /opt/arm-tools/catalog.json or LocalToolDispatcher."""
+        meta_tool = {
+            "name": "mcp__search_tools",
+            "description": "Lazy-loaded meta-tool. Search for unlisted tools on-demand.",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
             },
-            {
-                "name": "profile_and_optimize_kernel",
-                "description": "Cross-compiles and profiles C++ inference kernels on Cortex-X925.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"source_code": {"type": "string"}},
-                    "required": ["source_code"],
-                },
-            },
-        ]
-        self.domain_tools = {
-            "physical-ai": [
-                {
-                    "name": "ros2_pointcloud_voxelizer_profile",
-                    "description": "Profiles ROS 2 pointcloud voxelization pipelines for Arm Neoverse.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {"voxel_size": {"type": "number"}},
-                    },
-                }
-            ]
         }
-        self.upstream_servers = {}
+        tools = [meta_tool]
+
+        catalog_path = os.environ.get("ARM_TOOLS_CATALOG", "/opt/arm-tools/catalog.json")
+        if os.path.exists(catalog_path):
+            try:
+                with open(catalog_path, encoding="utf-8") as f:
+                    data = json.load(f)
+                    for t in data.get("tools", []):
+                        tools.append(
+                            {
+                                "name": t.get("name"),
+                                "description": t.get("description", ""),
+                                "parameters": t.get(
+                                    "inputSchema",
+                                    t.get("parameters", {"type": "object", "properties": {}}),
+                                ),
+                            }
+                        )
+                return tools
+            except Exception as e:
+                logger.error(f"Failed to read data plane catalog from {catalog_path}: {e}")
+
+        # Fallback to LocalToolDispatcher default tool schemas
+        from src.data_plane.worker.tool_dispatcher import LocalToolDispatcher
+
+        dispatcher = LocalToolDispatcher()
+        fallback_path = os.path.join(dispatcher.tools_dir, "catalog.json")
+        if os.path.exists(fallback_path):
+            try:
+                with open(fallback_path, encoding="utf-8") as f:
+                    data = json.load(f)
+                    for t in data.get("tools", []):
+                        tools.append(
+                            {
+                                "name": t.get("name"),
+                                "description": t.get("description", ""),
+                                "parameters": t.get(
+                                    "inputSchema",
+                                    t.get("parameters", {"type": "object", "properties": {}}),
+                                ),
+                            }
+                        )
+                return tools
+            except Exception:
+                pass
+
+        tools.append(
+            {
+                "name": "optimize_kernel",
+                "description": "Cross-compiles and optimizes kernel code within a sandboxed data plane.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"code": {"type": "string"}},
+                    "required": ["code"],
+                },
+            }
+        )
+        return tools
 
     def get_sliced_tools(self, workspace_context: str | None = None) -> list[dict[str, Any]]:
         """Slices tool list based on X-Workspace-Context header.
@@ -251,19 +288,18 @@ class MCPMultiplexerService:
             Deferred FunctionToolset or tool dictionary list.
         """
         all_tools = self.get_sliced_tools(domain)
-        logger.info(f"Building deferred MCP toolset with {len(all_tools)} tools (defer_loading=True)")
+        logger.info(
+            f"Building deferred MCP toolset with {len(all_tools)} tools (defer_loading=True)"
+        )
 
         try:
             from pydantic_ai_harness.tools import FunctionToolset
+
             toolset = FunctionToolset(
                 tools=all_tools,
-                defer_loading=True  # Keeps tools hidden until explicit search discovery
+                defer_loading=True,  # Keeps tools hidden until explicit search discovery
             ).with_metadata(code_mode=True)
             return toolset
         except ImportError:
             # Fallback wrapper dictionary when harness package is running in simulation mode
-            return {
-                "tools": all_tools,
-                "defer_loading": True,
-                "metadata": {"code_mode": True}
-            }
+            return {"tools": all_tools, "defer_loading": True, "metadata": {"code_mode": True}}

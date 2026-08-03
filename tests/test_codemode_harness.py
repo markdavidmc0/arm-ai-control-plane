@@ -1,6 +1,7 @@
 """Integration tests for CodeMode harness, dynamic_catalog prompt cache protection, and Data Plane REPL runner."""
 
 import asyncio
+
 import pytest
 
 from src.control_plane.services.agent_factory import create_arm_agent
@@ -55,10 +56,16 @@ async def test_prompt_cache_preservation():
         assert capability.tools == {"code_mode": True}
     else:
         # Pydantic AI Agent mode (capabilities stored in root_capability)
-        root_cap = getattr(agent, "root_capability", None) or getattr(agent, "_root_capability", None)
+        root_cap = getattr(agent, "root_capability", None) or getattr(
+            agent, "_root_capability", None
+        )
         assert root_cap is not None
         cap_list = getattr(root_cap, "capabilities", [root_cap])
-        code_mode_caps = [c for c in cap_list if "CodeMode" in c.__class__.__name__ or hasattr(c, "dynamic_catalog")]
+        code_mode_caps = [
+            c
+            for c in cap_list
+            if "CodeMode" in c.__class__.__name__ or hasattr(c, "dynamic_catalog")
+        ]
         assert len(code_mode_caps) > 0
         assert getattr(code_mode_caps[0], "dynamic_catalog", True) is True
 
@@ -102,3 +109,36 @@ async def test_deferred_mcp_toolset_building():
         assert toolset["metadata"] == {"code_mode": True}
     else:
         assert getattr(toolset, "defer_loading", True) is True
+
+
+@pytest.mark.asyncio
+async def test_top_level_await_execution():
+    """Verify DataPlaneSandboxRunner executes scripts with top-level await statements without SyntaxError."""
+    runner = DataPlaneSandboxRunner(memory_limit_mb=512, timeout_seconds=10.0)
+
+    code_snippet = """
+profile = await arm_tools.profile_and_optimize_kernel(source_code="void matmul() {}")
+status_val = profile["result"]["status"]
+result = f"Status: {status_val}"
+"""
+    resp = await runner.execute_payload(code_snippet)
+
+    assert resp["status"] == "success"
+    assert resp["result"] == "Status: SUCCESS"
+    assert "profile" in resp["updated_repl_state"]
+    assert resp["updated_repl_state"]["status_val"] == "SUCCESS"
+
+
+@pytest.mark.asyncio
+async def test_arm_tools_keyword_arg_forwarding():
+    """Verify dynamic method calls on arm_tools forward keyword arguments to LocalToolDispatcher."""
+    runner = DataPlaneSandboxRunner(memory_limit_mb=512, timeout_seconds=10.0)
+
+    code_snippet = """
+res = await arm_tools.profile_and_optimize_kernel(code="void custom_kernel() {}", use_gvisor=True)
+result = res["result"]["status"]
+"""
+    resp = await runner.execute_payload(code_snippet)
+
+    assert resp["status"] == "success"
+    assert resp["result"] == "SUCCESS"

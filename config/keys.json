@@ -6,7 +6,7 @@
       "role": "judge",
       "hash": "07a82914104928e1d51a660a5e9f8a3d1326462c9c5f8df67319520a28f8045d",
       "salt": "mvcp_salt_2026",
-      "scopes": ["compiler", "autotuner", "heatmap", "sandbox", "llm"],
+      "scopes": ["compiler", "sandbox", "llm", "tools:register", "tools:read"],
       "created_at": "2026-07-24T12:00:00Z",
       "status": "active"
     },
@@ -16,7 +16,7 @@
       "role": "dev",
       "hash": "c20dbbf51508db8cf1ad32fef923a13768dd10214a123f81e34e56598c1b9be3",
       "salt": "mvcp_salt_2026",
-      "scopes": ["compiler", "autotuner", "heatmap", "sandbox"],
+      "scopes": ["compiler", "sandbox", "llm", "tools:read"],
       "created_at": "2026-07-24T12:00:00Z",
       "status": "active"
     },
@@ -26,7 +26,7 @@
       "role": "m2m",
       "hash": "f290d238cb0973a21396347c6a9a838526848fa7d4db3c678a1ee1b47169622d",
       "salt": "mvcp_salt_2026",
-      "scopes": ["compiler", "autotuner"],
+      "scopes": ["compiler", "sandbox", "tools:register"],
       "created_at": "2026-07-24T12:00:00Z",
       "status": "active"
     }

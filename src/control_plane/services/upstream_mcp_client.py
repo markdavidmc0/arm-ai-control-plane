@@ -8,6 +8,7 @@ Includes deterministic local fallback when remote URLs are offline during unit t
 import logging
 import time
 from typing import Any
+
 import httpx
 
 logger = logging.getLogger("mvcp.upstream_mcp_client")

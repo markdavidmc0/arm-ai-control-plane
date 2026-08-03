@@ -45,7 +45,7 @@ class AuthService:
         """Loads API key records from keys.json."""
         if os.path.exists(self.config_path):
             try:
-                with open(self.config_path, "r", encoding="utf-8") as f:
+                with open(self.config_path, encoding="utf-8") as f:
                     data = json.load(f)
                     self.keys_db = data.get("keys", [])
                 logger.info(f"Loaded {len(self.keys_db)} API key records from {self.config_path}")
@@ -63,7 +63,7 @@ class AuthService:
                     "role": "judge",
                     "hash": hash_key("judge_secret_key_123"),
                     "salt": "mvcp_salt_2026",
-                    "scopes": ["compiler", "autotuner", "heatmap", "sandbox", "llm"],
+                    "scopes": ["compiler", "sandbox", "llm", "tools:register", "tools:read"],
                     "status": "active",
                 },
                 {
@@ -72,7 +72,7 @@ class AuthService:
                     "role": "dev",
                     "hash": hash_key("arm_dev_local_test_key_123"),
                     "salt": "mvcp_salt_2026",
-                    "scopes": ["compiler", "autotuner", "heatmap", "sandbox"],
+                    "scopes": ["compiler", "sandbox", "llm", "tools:read"],
                     "status": "active",
                 },
             ]
@@ -107,12 +107,18 @@ class AuthService:
             "arm_m2m_test_key_456",
             "mcp_ci_runner_secret_2026",
         ]:
-            assigned_role = "judge" if "judge" in clean_key else "m2m" if ("m2m" in clean_key or "ci_runner" in clean_key) else "dev"
+            assigned_role = (
+                "judge"
+                if "judge" in clean_key
+                else "m2m"
+                if ("m2m" in clean_key or "ci_runner" in clean_key)
+                else "dev"
+            )
             return {
                 "key_id": f"key_{assigned_role}_fallback",
                 "name": f"Fallback {assigned_role.upper()} Key",
                 "role": assigned_role,
-                "scopes": ["compiler", "autotuner", "heatmap", "sandbox", "llm", "tools:register"],
+                "scopes": ["compiler", "sandbox", "llm", "tools:register", "tools:read"],
                 "status": "active",
             }
 
@@ -123,7 +129,7 @@ class AuthService:
                 "key_id": jwt_payload.get("sub", "keycloak_m2m_runner"),
                 "name": "Keycloak M2M Runner",
                 "role": "m2m",
-                "scopes": ["tools:register", "compiler", "autotuner"],
+                "scopes": ["compiler", "sandbox", "tools:register", "tools:read"],
                 "status": "active",
             }
 
@@ -161,9 +167,9 @@ class AuthService:
             sub = payload.get("sub", "")
             repo = payload.get("repository", "")
 
-            is_github_oidc = (
-                "token.actions.githubusercontent.com" in iss
-                and ("markdavidmc0/arm-developer-workspace" in repo or "markdavidmc0/arm-developer-workspace" in sub)
+            is_github_oidc = "token.actions.githubusercontent.com" in iss and (
+                "markdavidmc0/arm-developer-workspace" in repo
+                or "markdavidmc0/arm-developer-workspace" in sub
             )
             is_keycloak_jwt = "arm-platform" in iss or "keycloak" in iss
 
@@ -219,3 +225,41 @@ class AuthService:
         valid_timestamps.append(now)
         self.rate_limit_records[identifier] = valid_timestamps
         return True, len(valid_timestamps)
+
+    def mint_keycloak_jwt(
+        self, grant_type: str = "client_credentials", client_id: str = "github-ci-runner"
+    ) -> str:
+        """Mints a Keycloak M2M OAuth2 JWT access token.
+
+        Args:
+            grant_type: OAuth2 grant type.
+            client_id: OAuth2 client identifier.
+
+        Returns:
+            URL-safe base64 encoded JWT access token string.
+        """
+        now = int(time.time())
+        exp = now + 900  # 15 minutes lifespan
+
+        header_dict = {"alg": "RS256", "typ": "JWT", "kid": "keycloak-m2m-key-1"}
+        payload_dict = {
+            "exp": exp,
+            "iat": now,
+            "iss": "https://keycloak.internal/realms/arm-platform",
+            "sub": "service-account-github-ci-runner",
+            "azp": client_id,
+            "client_id": client_id,
+            "grant_type": grant_type,
+            "scope": "tools:register profile email",
+            "realm_access": {"roles": ["mcp-registrar", "default-roles-arm-platform"]},
+        }
+
+        def b64_encode(data_dict: dict[str, Any]) -> str:
+            raw = json.dumps(data_dict).encode("utf-8")
+            return base64.urlsafe_b64encode(raw).decode("utf-8").rstrip("=")
+
+        header_b64 = b64_encode(header_dict)
+        payload_b64 = b64_encode(payload_dict)
+        signature_b64 = b64_encode({"sig": "mock_rs256_keycloak_signature"})
+
+        return f"{header_b64}.{payload_b64}.{signature_b64}"

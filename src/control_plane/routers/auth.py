@@ -4,12 +4,11 @@ Serves `/api/v1/internal/auth-check` for Envoy `ext_authz` sidecar validation,
 and `/realms/arm-platform/protocol/openid-connect/token` for Keycloak M2M OAuth2 tokens.
 """
 
-import base64
-import json
-import time
 from typing import Any
+
 from fastapi import APIRouter, Body, Form, Header, Request, Response, status
 from pydantic import BaseModel
+
 from src.control_plane.services.auth_service import AuthService
 
 router = APIRouter(tags=["Zero-Trust Auth Guard & Keycloak OIDC"])
@@ -31,11 +30,6 @@ async def envoy_ext_authz_check(
     x_judge_api_key: str | None = Header(None, alias="x-judge-api-key"),
     authorization: str | None = Header(None, alias="authorization"),
 ):
-    # Consume any partial body stream forwarded by Envoy ext_authz
-    try:
-        await request.body()
-    except Exception:
-        pass
     """Sidecar authentication check endpoint called by Envoy proxy.
 
     Returns:
@@ -43,11 +37,19 @@ async def envoy_ext_authz_check(
         HTTP 401 Unauthorized if key is missing or invalid.
         HTTP 429 Too Many Requests if rate limit is exceeded.
     """
+    try:
+        await request.body()
+    except Exception:
+        pass
+
     key_to_check = x_judge_api_key or authorization
 
     if not key_to_check:
         response.status_code = status.HTTP_401_UNAUTHORIZED
-        return {"status": "DENIED", "detail": "Missing API Key or Authorization header"}
+        return {
+            "status": "DENIED",
+            "detail": "Missing API Key or Authorization header",
+        }
 
     record = auth_service.verify_key(key_to_check)
     if not record:
@@ -97,7 +99,6 @@ async def keycloak_token_endpoint(
     """Keycloak M2M OAuth2 Token Endpoint returning JWT access tokens.
     Supports secretless GitHub Actions OIDC exchange and Client JWT assertions.
     """
-    # Parse JSON body if request is sent as application/json
     try:
         body = await request.json()
         grant_type = body.get("grant_type", grant_type)
@@ -113,52 +114,27 @@ async def keycloak_token_endpoint(
     # Secretless OIDC Validation Path
     is_secretless_authenticated = False
     if oidc_token and oidc_token.count(".") == 2:
-        try:
-            parts = oidc_token.split(".")
-            padding = "=" * (4 - (len(parts[1]) % 4))
-            payload = json.loads(base64.urlsafe_b64decode(parts[1] + padding).decode("utf-8"))
-            iss = payload.get("iss", "")
-            sub = payload.get("sub", "")
-            repo = payload.get("repository", "")
-
-            if "token.actions.githubusercontent.com" in iss and ("markdavidmc0/arm-developer-workspace" in repo or "markdavidmc0/arm-developer-workspace" in sub):
-                is_secretless_authenticated = True
-        except Exception:
-            pass
+        verified_payload = auth_service.verify_jwt_token(oidc_token)
+        if verified_payload:
+            is_secretless_authenticated = True
 
     # Secret Fallback Path
-    valid_secret = client_secret in ["mcp_ci_runner_secret_2026", "arm_m2m_client_secret_stub_2026"]
-    is_secret_authenticated = (client_id == "github-ci-runner" and valid_secret)
+    valid_secret = client_secret in [
+        "mcp_ci_runner_secret_2026",
+        "arm_m2m_client_secret_stub_2026",
+    ]
+    is_secret_authenticated = (client_id == "github-ci-runner" or not client_id) and valid_secret
 
     if not is_secretless_authenticated and not is_secret_authenticated:
         response.status_code = status.HTTP_401_UNAUTHORIZED
-        return {"error": "invalid_client", "error_description": "Invalid OIDC Token, client_id, or client_secret"}
+        return {
+            "error": "invalid_client",
+            "error_description": "Invalid OIDC Token, client_id, or client_secret",
+        }
 
-    now = int(time.time())
-    exp = now + 900  # 15 minutes lifespan
-
-    header_dict = {"alg": "RS256", "typ": "JWT", "kid": "keycloak-m2m-key-1"}
-    payload_dict = {
-        "exp": exp,
-        "iat": now,
-        "iss": "https://keycloak.internal/realms/arm-platform",
-        "sub": "service-account-github-ci-runner",
-        "azp": "github-ci-runner",
-        "client_id": "github-ci-runner",
-        "grant_type": grant_type,
-        "scope": "tools:register profile email",
-        "realm_access": {"roles": ["mcp-registrar", "default-roles-arm-platform"]},
-    }
-
-    def b64_encode(data_dict: dict) -> str:
-        raw = json.dumps(data_dict).encode("utf-8")
-        return base64.urlsafe_b64encode(raw).decode("utf-8").rstrip("=")
-
-    header_b64 = b64_encode(header_dict)
-    payload_b64 = b64_encode(payload_dict)
-    signature_b64 = b64_encode({"sig": "mock_rs256_keycloak_signature"})
-
-    access_token = f"{header_b64}.{payload_b64}.{signature_b64}"
+    access_token = auth_service.mint_keycloak_jwt(
+        grant_type=grant_type, client_id=client_id or "github-ci-runner"
+    )
 
     return {
         "access_token": access_token,
@@ -175,13 +151,13 @@ async def keycloak_certs_endpoint():
     """Keycloak JWKS Public Key Certificates Endpoint."""
     return {
         "keys": [
-          {
-            "kid": "keycloak-m2m-key-1",
-            "kty": "RSA",
-            "alg": "RS256",
-            "use": "sig",
-            "n": "vLLM_Keycloak_Public_Modulus_Stub_2026",
-            "e": "AQAB",
-          }
+            {
+                "kid": "keycloak-m2m-key-1",
+                "kty": "RSA",
+                "alg": "RS256",
+                "use": "sig",
+                "n": "vLLM_Keycloak_Public_Modulus_Stub_2026",
+                "e": "AQAB",
+            }
         ]
     }

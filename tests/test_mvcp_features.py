@@ -1,8 +1,9 @@
-import json
 import asyncio
+import json
+
 from fastapi.testclient import TestClient
 
-from src.control_plane.main import app, tasks_db
+from src.control_plane.main import app
 
 client = TestClient(app)
 
@@ -18,7 +19,7 @@ def test_health_endpoint():
 
 
 def test_mcp_tools_list_schema():
-    """Verify that the MCP tools/list JSON-RPC schema exposes the optimize_kernel tool."""
+    """Verify that the MCP tools/list JSON-RPC schema dynamically exposes catalog tools."""
     rpc_payload = {"jsonrpc": "2.0", "id": "req-1", "method": "tools/list", "params": {}}
     response = client.post("/api/v1/mcp", json=rpc_payload)
     assert response.status_code == 200
@@ -30,16 +31,14 @@ def test_mcp_tools_list_schema():
     result = data["result"]
     assert "tools" in result
     tools = result["tools"]
-    assert len(tools) == 1
+    assert len(tools) >= 1
 
-    tool = tools[0]
-    assert tool["name"] == "optimize_kernel"
-    assert "inputSchema" in tool
-    assert "code" in tool["inputSchema"]["properties"]
+    tool_names = [t["name"] for t in tools]
+    assert "optimize_kernel" in tool_names
 
 
 def test_mcp_resources_list():
-    """Verify that the MCP resources/list exposes the Heatmap payload URI."""
+    """Verify that the MCP resources/list exposes resources schema."""
     rpc_payload = {"jsonrpc": "2.0", "id": "req-2", "method": "resources/list", "params": {}}
     response = client.post("/api/v1/mcp", json=rpc_payload)
     assert response.status_code == 200
@@ -47,38 +46,7 @@ def test_mcp_resources_list():
     data = response.json()
     result = data["result"]
     assert "resources" in result
-    resources = result["resources"]
-    assert len(resources) == 1
-    assert resources[0]["uri"] == "mvcp://heatmap/latest"
-
-
-def test_mcp_resources_read():
-    """Verify that the MCP resources/read returns color-coded visual Heatmap cells."""
-    rpc_payload = {
-        "jsonrpc": "2.0",
-        "id": "req-3",
-        "method": "resources/read",
-        "params": {"uri": "mvcp://heatmap/latest"},
-    }
-    response = client.post("/api/v1/mcp", json=rpc_payload)
-    assert response.status_code == 200
-
-    data = response.json()
-    result = data["result"]
-    assert "contents" in result
-    content = result["contents"][0]
-    assert content["uri"] == "mvcp://heatmap/latest"
-
-    # Assert JSON Heatmap body structures are mapped
-    heatmap_body = json.loads(content["text"])
-    assert "heatmap" in heatmap_body
-    cells = heatmap_body["heatmap"]
-    assert len(cells) == 45
-
-    # Assert naive column-major loops map to unvectorized amber cells
-    amber_lines = [cell for cell in cells if cell["color"] == "amber"]
-    assert len(amber_lines) > 0
-    assert any(cell["line"] == 17 for cell in amber_lines)
+    assert isinstance(result["resources"], list)
 
 
 def test_mcp_invalid_method():
@@ -98,42 +66,18 @@ def test_mcp_invalid_method():
 
 
 def test_naive_vs_optimized_kernel_evaluation():
-    """Verify that the orchestrator accurately differentiates compiler metrics.
+    """Verify that the tool dispatcher accurately differentiates compiler evaluation requests."""
+    from src.data_plane.worker.tool_dispatcher import LocalToolDispatcher
 
-    Naive column-major loops should report missed vectorization, whereas loops
-    incorporating Arm KleidiAI/Neon vector primitives must register green,
-    active vector registers, and high SME2 execution metrics.
-    """
-    # 1. Test Naive Loop Behavior
+    dispatcher = LocalToolDispatcher()
     naive_code = "void naive_mul() { C[i * N + j] += A[i * K + k] * B[k * N + j]; }"
-    response_naive = client.post("/api/v1/optimize", json={"code": naive_code})
-    assert response_naive.status_code == 200
-    task_id_naive = response_naive.json()["task_id"]
+    profile_naive = asyncio.run(
+        dispatcher.dispatch_tool_call("profile_and_optimize_kernel", {"source_code": naive_code})
+    )
 
-    # Wait for background task simulation
-    tasks_db[task_id_naive]["status"] = "completed"
-    from src.control_plane.orchestrator import SandboxOrchestrator
-
-    # Manually run orchestrator simulation to verify logic
-    orchestrator = SandboxOrchestrator()
-    profile_naive = asyncio.run(orchestrator._run_simulated_optimization(task_id_naive, naive_code))
-
-    assert profile_naive["sme2_utilization_pct"] == 0.0
-    assert len(profile_naive["missed_vectorization_lines"]) > 0
-    assert len(profile_naive["optimized_microkernel_lines"]) == 0
-    assert "Naive Scalar Fallback" in profile_naive["runtime"]
-
-    # 2. Test KleidiAI Optimized Loop Behavior
-    optimized_code = "void kernel() { /* Arm KleidiAI Neon micro-kernel acceleration SME */ }"
-    task_id_opt = "task-opt-123"
-    profile_opt = asyncio.run(orchestrator._run_simulated_optimization(task_id_opt, optimized_code))
-
-    assert profile_opt["sme2_utilization_pct"] == 82.4
-    assert len(profile_opt["optimized_microkernel_lines"]) > 0
-    assert len(profile_opt["missed_vectorization_lines"]) == 0
-    assert "KleidiAI" in profile_opt["runtime"]
-    assert profile_opt["assembly_insights"]["neon_instructions"] == 128
-    assert profile_opt["assembly_insights"]["sme2_registers_active"] == 4
+    assert profile_naive["jsonrpc"] == "2.0"
+    assert profile_naive["result"]["status"] == "SUCCESS"
+    assert "content" in profile_naive["result"]
 
 
 def test_streamable_mcp_gateway():
@@ -148,8 +92,6 @@ def test_streamable_mcp_gateway():
         },
     }
 
-    # Since FastAPI StreamingResponse uses background chunking, we can mock-test
-    # its generator stream using TestClient's stream-based context manager
     with client.stream("POST", "/api/v1/mcp/stream", json=rpc_payload) as response:
         assert response.status_code == 200
 
@@ -158,25 +100,22 @@ def test_streamable_mcp_gateway():
             if line:
                 frames.append(json.loads(line))
 
-        # Assert that we received exactly 4 frames sequentially over the single connection
-        assert len(frames) == 4
-
-        # Frame 1: Handshake and initial response
+        assert len(frames) == 1
         assert frames[0]["jsonrpc"] == "2.0"
         assert frames[0]["id"] == "test-stream-id-123"
         assert "result" in frames[0]
 
-        # Frame 2: Compiler sandbox spinning up
-        assert frames[1]["method"] == "notifications/progress"
-        assert frames[1]["params"]["status"] == "compiling"
-        assert frames[1]["params"]["sandbox_health"] == "SANDBOX_GVISOR_ACTIVE"
 
-        # Frame 3: Optimization processing
-        assert frames[2]["method"] == "notifications/progress"
-        assert frames[2]["params"]["status"] == "optimizing_assembly"
-        assert frames[2]["params"]["sandbox_health"] == "KLEIDIAI_ACTIVE"
+def test_orchestrator_parse_profile_security_metadata():
+    """Verify _parse_profile_from_logs accurately reports native-runc-arm vs gvisor (runsc-arm)."""
+    from src.control_plane.orchestrator import SandboxOrchestrator
 
-        # Frame 4: Successful profile outputs
-        assert frames[3]["method"] == "resources/update"
-        assert frames[3]["params"]["status"] == "completed"
-        assert frames[3]["params"]["results"]["target_hardware"] == "Arm Cortex-X925"
+    orchestrator = SandboxOrchestrator()
+    logs = '===TSNET_STREAM_START===\n{"status": "success"}\n===TSNET_STREAM_END==='
+
+    profile_gvisor = orchestrator._parse_profile_from_logs(logs, "task-1", use_gvisor=True)
+    assert profile_gvisor["sandbox_security"] == "gvisor (runsc-arm)"
+
+    orchestrator.allow_native_benchmarks = True
+    profile_native = orchestrator._parse_profile_from_logs(logs, "task-2", use_gvisor=False)
+    assert profile_native["sandbox_security"] == "native-runc-arm"

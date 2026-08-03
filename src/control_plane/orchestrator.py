@@ -49,18 +49,14 @@ class SandboxOrchestrator:
                     f"Failed to load Kubernetes configuration: {e}. Orchestrator will run in simulation mode."
                 )
 
-    async def optimize_and_profile(
+    def build_pod_manifest(
         self,
         task_id: str,
         cxx_code: str,
         use_gvisor: bool = True,
         execution_mode: str = "codemode",
     ) -> dict[str, Any]:
-        """Orchestrates the sandbox environment by spinning up a transient Pod on GKE.
-
-        Spins up a Pod running inside a secure gVisor container or native runc container,
-        schedules it onto Arm64 architectures, compiles and profiles the kernel, and pulls
-        performance stream logs.
+        """Constructs the declarative Kubernetes Pod manifest dictionary for gVisor/runc sandbox scheduling.
 
         Args:
             task_id: Unique task identifier.
@@ -69,51 +65,51 @@ class SandboxOrchestrator:
             execution_mode: Execution mode slug ('codemode' or 'direct').
 
         Returns:
-            A dictionary containing compilation status, hardware utilization metrics,
-            and line-by-line optimization analysis.
-
-        Raises:
-            RuntimeError: If GKE sandbox execution fails.
-            TimeoutError: If sandbox execution times out.
+            A declarative Kubernetes Pod manifest dictionary.
         """
-        logger.info(
-            f"Initiating optimization task {task_id} (use_gvisor={use_gvisor}, execution_mode={execution_mode})"
-        )
-
-        if not self.k8s_client_configured:
-            return await self._run_simulated_optimization(
-                task_id, cxx_code, use_gvisor=use_gvisor, execution_mode=execution_mode
-            )
-
-        v1 = client.CoreV1Api()
         pod_name = f"mvcp-sandbox-{task_id}"
-        namespace = "default"
 
         # Determine runtime class and node pool target
         is_gvisor = use_gvisor or not self.allow_native_benchmarks
         runtime_class = "gvisor" if is_gvisor else None
         target_node_label = "arm-gvisor-sandbox" if is_gvisor else "arm-native-baseline"
 
-        # Constructing pod spec forcing arm architecture and gVisor or native execution
+        volumes = [{"name": "tools-volume", "emptyDir": {}}] if execution_mode == "codemode" else []
+
+        init_containers = (
+            [
+                {
+                    "name": "tools-installer",
+                    "image": "us-central1-docker.pkg.dev/sovereign-ai-495715/mcp-tools/arm-workspace-tools:latest",
+                    "command": ["sh", "-c", "cp -r /workspace/mcp_tools/* /opt/arm-tools/ || true"],
+                    "volumeMounts": [{"name": "tools-volume", "mountPath": "/opt/arm-tools/"}],
+                }
+            ]
+            if execution_mode == "codemode"
+            else []
+        )
+
+        volume_mounts = (
+            [
+                {
+                    "name": "tools-volume",
+                    "mountPath": "/opt/arm-tools/",
+                    "readOnly": True,
+                }
+            ]
+            if execution_mode == "codemode"
+            else []
+        )
+
+        # Construct pod spec forcing Arm64 architecture and gVisor or native execution
         pod_spec: dict[str, Any] = {
             "restartPolicy": "Never",
             "nodeSelector": {
                 "kubernetes.io/arch": "arm64",
                 "mvcp.ai/node-type": target_node_label,
             },
-            "volumes": [
-                {"name": "tools-volume", "emptyDir": {}}
-            ],
-            "initContainers": [
-                {
-                    "name": "tools-installer",
-                    "image": "us-central1-docker.pkg.dev/sovereign-ai-495715/mcp-tools/arm-workspace-tools:latest",
-                    "command": ["sh", "-c", "cp -r /workspace/mcp_tools/* /opt/arm-tools/ || true"],
-                    "volumeMounts": [
-                        {"name": "tools-volume", "mountPath": "/opt/arm-tools/"}
-                    ],
-                }
-            ],
+            "volumes": volumes,
+            "initContainers": init_containers,
             "containers": [
                 {
                     "name": "compiler-sandbox",
@@ -135,13 +131,7 @@ class SandboxOrchestrator:
                         },
                         {"name": "TASK_ID", "value": task_id},
                     ],
-                    "volumeMounts": [
-                        {
-                            "name": "tools-volume",
-                            "mountPath": "/opt/arm-tools/",
-                            "readOnly": True,
-                        }
-                    ],
+                    "volumeMounts": volume_mounts,
                     "resources": {
                         "limits": {"cpu": "2", "memory": "2Gi"},
                         "requests": {"cpu": "1", "memory": "1Gi"},
@@ -153,7 +143,7 @@ class SandboxOrchestrator:
         if runtime_class:
             pod_spec["runtimeClassName"] = runtime_class
 
-        pod_manifest = {
+        return {
             "apiVersion": "v1",
             "kind": "Pod",
             "metadata": {
@@ -167,50 +157,94 @@ class SandboxOrchestrator:
             "spec": pod_spec,
         }
 
+    async def optimize_and_profile(
+        self,
+        task_id: str,
+        cxx_code: str,
+        use_gvisor: bool = True,
+        execution_mode: str = "codemode",
+    ) -> dict[str, Any]:
+        """Orchestrates the sandbox environment by spinning up a transient Pod on GKE.
+
+        Args:
+            task_id: Unique task identifier.
+            cxx_code: The C++ kernel code to compile and profile.
+            use_gvisor: Whether to enforce gVisor runsc sandbox isolation.
+            execution_mode: Execution mode slug ('codemode' or 'direct').
+
+        Returns:
+            A dictionary containing compilation status, hardware utilization metrics,
+            and line-by-line optimization analysis.
+
+        Raises:
+            RuntimeError: If Kubernetes configuration is missing or sandbox execution fails.
+            TimeoutError: If sandbox execution times out.
+        """
+        logger.info(
+            f"Initiating optimization task {task_id} (use_gvisor={use_gvisor}, execution_mode={execution_mode})"
+        )
+
+        if not self.k8s_client_configured:
+            raise RuntimeError(
+                "Kubernetes client is not configured. Unable to orchestrate GKE/Kind sandbox pod."
+            )
+
+        v1 = client.CoreV1Api()
+        pod_name = f"mvcp-sandbox-{task_id}"
+        namespace = "default"
+
+        pod_manifest = self.build_pod_manifest(
+            task_id=task_id, cxx_code=cxx_code, use_gvisor=use_gvisor, execution_mode=execution_mode
+        )
+
         try:
-            logger.info(f"Creating GKE gVisor sandbox Pod: {pod_name}")
-            v1.create_namespaced_pod(body=pod_manifest, namespace=namespace)
+            logger.info(f"Creating GKE/Kind sandbox Pod: {pod_name}")
+            await asyncio.to_thread(
+                v1.create_namespaced_pod, body=pod_manifest, namespace=namespace
+            )
 
             # Monitor Pod completion
             timeout = 180  # 3 minutes max timeout
             elapsed = 0
             while elapsed < timeout:
-                pod_status = v1.read_namespaced_pod_status(name=pod_name, namespace=namespace)
+                pod_status = await asyncio.to_thread(
+                    v1.read_namespaced_pod_status, name=pod_name, namespace=namespace
+                )
                 phase = pod_status.status.phase
                 logger.info(f"Pod {pod_name} state: {phase}")
 
                 if phase == "Succeeded":
-                    # Retrieve the securely streamed profile data printed to standard output (simulating output streaming via tsnet)
-                    logs = v1.read_namespaced_pod_log(name=pod_name, namespace=namespace)
+                    logs = await asyncio.to_thread(
+                        v1.read_namespaced_pod_log, name=pod_name, namespace=namespace
+                    )
                     logger.info(f"Pod {pod_name} finished. Retrieving profile details.")
-
-                    # Clean up the pod
-                    v1.delete_namespaced_pod(name=pod_name, namespace=namespace)
-                    return self._parse_profile_from_logs(logs, task_id)
+                    await asyncio.to_thread(
+                        v1.delete_namespaced_pod, name=pod_name, namespace=namespace
+                    )
+                    return self._parse_profile_from_logs(logs, task_id, use_gvisor=use_gvisor)
 
                 elif phase == "Failed":
-                    logs = v1.read_namespaced_pod_log(name=pod_name, namespace=namespace)
+                    logs = await asyncio.to_thread(
+                        v1.read_namespaced_pod_log, name=pod_name, namespace=namespace
+                    )
                     logger.error(f"Sandbox Pod execution failed: {logs}")
-                    v1.delete_namespaced_pod(name=pod_name, namespace=namespace)
+                    await asyncio.to_thread(
+                        v1.delete_namespaced_pod, name=pod_name, namespace=namespace
+                    )
                     raise RuntimeError(f"GKE Sandbox execution failed: {logs}")
 
                 await asyncio.sleep(5)
                 elapsed += 5
 
-            v1.delete_namespaced_pod(name=pod_name, namespace=namespace)
+            await asyncio.to_thread(v1.delete_namespaced_pod, name=pod_name, namespace=namespace)
             raise TimeoutError(f"Sandbox execution timed out after {timeout} seconds.")
 
         except ApiException as e:
             logger.error(f"Kubernetes API Exception during orchestration: {e}")
-            logger.info("Falling back to simulated optimization results...")
-            return await self._run_simulated_optimization(task_id, cxx_code)
+            raise RuntimeError(f"Kubernetes API Exception during orchestration: {e.reason}") from e
 
     def _generate_sandbox_bootstrap_command(self, cxx_code: str) -> str:
         """Generates a Python script that runs matrix.cpp inside the sandbox.
-
-        Writes matrix.cpp, runs compile_and_profile.py, and prints the
-        resulting performance JSON payload to standard output, simulating
-        safe socket streaming.
 
         Args:
             cxx_code: The C++ source code to write.
@@ -218,16 +252,19 @@ class SandboxOrchestrator:
         Returns:
             A string containing the Python bootstrap command script.
         """
-        escaped_code = cxx_code.replace("\\", "\\\\").replace("'", "\\'")
+        import base64
+
+        encoded_code = base64.b64encode(cxx_code.encode("utf-8")).decode("utf-8")
 
         return f"""
+import base64
 import json
 import os
 import sys
 
-# Write code
+cxx_decoded = base64.b64decode("{encoded_code}").decode("utf-8")
 with open("matrix.cpp", "w") as f:
-    f.write('''{escaped_code}''')
+    f.write(cxx_decoded)
 
 sys.path.append(os.getcwd())
 
@@ -240,25 +277,28 @@ except Exception as e:
         "message": f"Compilation failed in sandbox: {{str(e)}}"
     }}
 
-# Stream the profile JSON securely
 print("===TSNET_STREAM_START===")
 print(json.dumps(profile))
 print("===TSNET_STREAM_END===")
 """
 
-    def _parse_profile_from_logs(self, logs: str, task_id: str) -> dict[str, Any]:
+    def _parse_profile_from_logs(
+        self, logs: str, task_id: str, use_gvisor: bool = True
+    ) -> dict[str, Any]:
         """Parses Pod standard output logs to extract performance JSON.
-
-        Extracts JSON between streaming marker lines and formats the results dictionary.
 
         Args:
             logs: The raw logs containing the streaming delimiters.
             task_id: Unique task identifier.
+            use_gvisor: Whether gVisor sandbox isolation is active.
 
         Returns:
             A dictionary containing the parsed performance profile.
         """
         import json
+
+        is_gvisor = use_gvisor or not self.allow_native_benchmarks
+        sec_label = "gvisor (runsc-arm)" if is_gvisor else "native-runc-arm"
 
         try:
             start_marker = "===TSNET_STREAM_START==="
@@ -268,7 +308,7 @@ print("===TSNET_STREAM_END===")
                 profile = json.loads(json_str)
                 profile["task_id"] = task_id
                 profile["sandboxed_execution"] = True
-                profile["sandbox_security"] = "gvisor (runsc-arm)"
+                profile["sandbox_security"] = sec_label
                 return profile
         except Exception as e:
             logger.error(f"Failed to parse performance stream logs: {e}")
@@ -276,86 +316,45 @@ print("===TSNET_STREAM_END===")
         return {
             "task_id": task_id,
             "status": "error",
+            "sandbox_security": sec_label,
             "message": "Stream corruption over secure network layer.",
         }
 
-    async def _run_simulated_optimization(
-        self,
-        task_id: str,
-        cxx_code: str,
-        use_gvisor: bool = True,
-        execution_mode: str = "codemode",
+    async def dispatch_dataplane_tool(
+        self, tool_name: str, arguments: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        """Runs a high-fidelity simulation of the optimization loop.
-
-        Guarantees that the entire control plane performs and responds
-        perfectly during local evaluations when a connection to a GKE
-        cluster is not established.
+        """Dispatches tool execution calls through GKE/Kind sandbox pod or Data Plane dispatcher.
 
         Args:
-            task_id: Unique task identifier.
-            cxx_code: The C++ source code to analyze.
-            use_gvisor: Whether gVisor sandbox isolation is active.
-            execution_mode: Execution mode slug ('codemode' or 'direct').
+            tool_name: The identifier of the tool to invoke.
+            arguments: Argument payload mapping required by the tool call.
 
         Returns:
-            A dictionary containing simulated compiler diagnostics and performance profiles.
+            Execution result dictionary.
         """
-        logger.info(
-            f"Running simulation mode for task {task_id} (use_gvisor={use_gvisor}, execution_mode={execution_mode})"
-        )
-        await asyncio.sleep(1.5)  # Simulate compiling latency
+        import json
+        import uuid
 
-        # Inspect Submitted C++ Kernel code to decide if it's the Naive or Optimized version
-        missed_vectorization_lines = []
-        optimized_microkernel_lines = []
-        is_optimized = False
+        from src.data_plane.worker.tool_dispatcher import LocalToolDispatcher
 
-        if (
-            "kleidi" in cxx_code.lower()
-            or "neon_micro_kernel" in cxx_code.lower()
-            or "sme" in cxx_code.lower()
-        ):
-            is_optimized = True
+        args = arguments or {}
 
-        # Map lines from the matrix.cpp file (standard 1-indexed)
-        if is_optimized:
-            optimized_microkernel_lines = [27, 28, 29, 30, 31, 32, 33, 34, 35, 36]
-            sme2_util = 82.4
-            peak_ram = 248
-            util_ext = 96.5
-            ttft_reduction = "78% TTFT Latency Reduction (24ms down to 5.2ms)"
-            runtime_lbl = "ExecuTorch + Arm KleidiAI Micro-kernels"
-        else:
-            missed_vectorization_lines = [16, 17, 18, 19, 20, 21, 22]  # Naive scalar bottleneck
-            sme2_util = 0.0
-            peak_ram = 320
-            util_ext = 0.0
-            ttft_reduction = "0% TTFT Latency Reduction (Scalar Loop Bottleneck)"
-            runtime_lbl = "ExecuTorch + Naive Scalar Fallback"
+        if self.k8s_client_configured and tool_name in [
+            "optimize_kernel",
+            "profile_and_optimize_kernel",
+        ]:
+            code = args.get("code") or args.get("source_code") or ""
+            task_id = str(uuid.uuid4())
+            profile_res = await self.optimize_and_profile(task_id, code)
+            return {
+                "jsonrpc": "2.0",
+                "result": {
+                    "tool_name": tool_name,
+                    "status": "SUCCESS",
+                    "content": [{"type": "text", "text": json.dumps(profile_res)}],
+                    "profile_details": profile_res,
+                },
+            }
 
-        sandbox_sec_label = "gvisor (runsc-arm)" if use_gvisor else "native-runc (arm64-baseline)"
-
-        return {
-            "task_id": task_id,
-            "status": "success",
-            "execution_mode": execution_mode,
-            "target_hardware": "Cortex-X925 (Armv9-A)",
-            "runtime": runtime_lbl,
-            "compiled_successfully": True,
-            "sme2_utilization_pct": sme2_util,
-            "peak_ram_mb": peak_ram,
-            "vector_extension_utilization_pct": util_ext,
-            "latency_ttft_impact": ttft_reduction,
-            "missed_vectorization_lines": missed_vectorization_lines,
-            "optimized_microkernel_lines": optimized_microkernel_lines,
-            "assembly_insights": {
-                "vectorized_loops": 1 if is_optimized else 0,
-                "scalar_fallback_loops": 0 if is_optimized else 1,
-                "register_spills": 0 if is_optimized else 4,
-                "neon_instructions": 128 if is_optimized else 0,
-                "sme2_registers_active": 4 if is_optimized else 0,
-            },
-            "sandbox_security": sandbox_sec_label,
-            "network_cryptography": "tsnet (virtual-node)",
-        }
+        dispatcher = LocalToolDispatcher()
+        return await dispatcher.dispatch_tool_call(tool_name, args)

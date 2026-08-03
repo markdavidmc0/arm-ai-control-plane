@@ -5,6 +5,7 @@ salted SHA-256 key matching, Keycloak OAuth2 token issuance, and M2M tool regist
 """
 
 from fastapi.testclient import TestClient
+
 from src.control_plane.main import app
 from src.control_plane.services.auth_service import AuthService, hash_key
 
@@ -36,7 +37,10 @@ def test_auth_check_bearer_key_success():
     )
     assert response.status_code == 200
     assert response.json()["status"] == "APPROVED"
-    assert "compiler" in response.headers["X-User-Scopes"]
+    scopes_header = response.headers["X-User-Scopes"]
+    assert "compiler" in scopes_header
+    assert "autotuner" not in scopes_header
+    assert "heatmap" not in scopes_header
 
 
 def test_auth_check_invalid_key():

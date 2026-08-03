@@ -1,64 +1,160 @@
+from unittest.mock import AsyncMock
+
 import pytest
-import json
-from src.control_plane.mcp_server import mcp
+
+from src.control_plane.mcp_server import MCPServer
 
 
 @pytest.mark.asyncio
-async def test_fastmcp_tool_registration():
-    """Verify that the FastMCP server has registered the target tools."""
-    tools = await mcp.list_tools()
-    assert len(tools) >= 1
+async def test_mcp_server_initialize():
+    """Verify handle_mcp_request handles standard initialize and initialized RPC calls."""
+    server = MCPServer()
 
-    tool_names = [t.name for t in tools]
-    assert "profile_and_optimize_kernel" in tool_names
+    init_req = {"jsonrpc": "2.0", "id": "init-1", "method": "initialize", "params": {}}
+    init_res = await server.handle_mcp_request(init_req)
+    assert init_res["jsonrpc"] == "2.0"
+    assert init_res["id"] == "init-1"
+    assert init_res["result"]["serverInfo"]["name"] == "mvcp-gke-gateway"
+
+    ack_req = {"jsonrpc": "2.0", "id": "ack-1", "method": "notifications/initialized", "params": {}}
+    ack_res = await server.handle_mcp_request(ack_req)
+    assert ack_res["jsonrpc"] == "2.0"
+    assert ack_res["id"] == "ack-1"
 
 
 @pytest.mark.asyncio
-async def test_profile_and_optimize_kernel_tool_execution():
-    """Verify that execution of profile_and_optimize_kernel returns the performance report."""
-    naive_code = "void naive_mul() { C[i] += A[i] * B[i]; }"
+async def test_mcp_server_dynamic_tools_list():
+    """Verify tools/list fetches tools dynamically from the Data Plane catalog."""
+    mock_dispatcher = AsyncMock()
+    mock_dispatcher._read_catalog.return_value = [
+        {
+            "name": "dynamic_compiler_tool",
+            "description": "Dynamic C++ compiler tool",
+            "inputSchema": {"type": "object", "properties": {"code": {"type": "string"}}},
+        }
+    ]
 
-    # Execute the FastMCP tool
-    report = await mcp.call_tool(
-        "profile_and_optimize_kernel", arguments={"source_code": naive_code}
+    server = MCPServer(tool_dispatcher=mock_dispatcher)
+    req = {"jsonrpc": "2.0", "id": "req-tools-list", "method": "tools/list", "params": {}}
+
+    res = await server.handle_mcp_request(req)
+    assert res["jsonrpc"] == "2.0"
+    assert "result" in res
+    tools = res["result"]["tools"]
+    assert len(tools) == 1
+    assert tools[0]["name"] == "dynamic_compiler_tool"
+
+
+@pytest.mark.asyncio
+async def test_mcp_server_handle_request_tools_call_async_mock():
+    """Verify handle_mcp_request awaits orchestrator.optimize_and_profile and returns json payload."""
+    mock_orchestrator = AsyncMock()
+    mock_orchestrator.k8s_client_configured = True
+    mock_orchestrator.optimize_and_profile.return_value = {
+        "task_id": "test-mock-task-123",
+        "status": "success",
+        "sme2_utilization_pct": 98.2,
+        "latency_ttft_impact": "85% TTFT Latency Reduction",
+        "peak_ram_mb": 210,
+    }
+
+    server = MCPServer(orchestrator=mock_orchestrator)
+    req = {
+        "jsonrpc": "2.0",
+        "id": "req-100",
+        "method": "tools/call",
+        "params": {"name": "optimize_kernel", "arguments": {"code": "void mock_kernel() {}"}},
+    }
+
+    response = await server.handle_mcp_request(req)
+    assert response["jsonrpc"] == "2.0"
+    assert response["id"] == "req-100"
+    assert "result" in response
+    content_text = response["result"]["content"][0]["text"]
+    assert "test-mock-task-123" in content_text
+    mock_orchestrator.optimize_and_profile.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_mcp_server_dispatcher_fallback_call():
+    """Verify tools/call delegates to LocalToolDispatcher when k8s client is not configured."""
+    mock_orchestrator = AsyncMock()
+    mock_orchestrator.k8s_client_configured = False
+
+    mock_dispatcher = AsyncMock()
+    mock_dispatcher.dispatch_tool_call.return_value = {
+        "status": "SUCCESS",
+        "output": "Dispatched via LocalToolDispatcher",
+    }
+
+    server = MCPServer(orchestrator=mock_orchestrator, tool_dispatcher=mock_dispatcher)
+    req = {
+        "jsonrpc": "2.0",
+        "id": "req-101",
+        "method": "tools/call",
+        "params": {"name": "ros2_pointcloud_voxelizer_profile", "arguments": {"voxel_size": 0.05}},
+    }
+
+    response = await server.handle_mcp_request(req)
+    assert response["jsonrpc"] == "2.0"
+    assert response["id"] == "req-101"
+    assert "result" in response
+    mock_dispatcher.dispatch_tool_call.assert_awaited_once_with(
+        "ros2_pointcloud_voxelizer_profile", {"voxel_size": 0.05}
     )
 
-    # Access the text content from the ToolResult object
-    report_text = report.content[0].text
 
-    # Assert formatting structure of results
-    assert "Arm Silicon Optimization Results" in report_text
-    assert "Engine Configuration" in report_text
-    assert "Naive Scalar" in report_text
-    assert "Arm KleidiAI Mode" in report_text
-    assert "Hand-Vectorized Neon Mode" in report_text
-    assert "Recommended Patch" in report_text
-    assert "vmlaq_f32" in report_text
+@pytest.mark.asyncio
+async def test_mcp_server_runtime_error_json_rpc_structure():
+    """Verify handle_mcp_request returns JSON-RPC error when orchestrator raises RuntimeError."""
+    mock_orchestrator = AsyncMock()
+    mock_orchestrator.k8s_client_configured = True
+    mock_orchestrator.optimize_and_profile.side_effect = RuntimeError(
+        "GKE Sandbox Pod execution failed"
+    )
+
+    server = MCPServer(orchestrator=mock_orchestrator)
+    req = {
+        "jsonrpc": "2.0",
+        "id": "req-102",
+        "method": "tools/call",
+        "params": {
+            "name": "optimize_kernel",
+            "arguments": {"code": "invalid_code"},
+        },
+    }
+
+    response = await server.handle_mcp_request(req)
+    assert response["jsonrpc"] == "2.0"
+    assert response["id"] == "req-102"
+    assert "error" in response
+    assert response["error"]["code"] == -32603
+    assert "GKE Sandbox Pod execution failed" in response["error"]["message"]
 
 
 @pytest.mark.asyncio
-async def test_fastmcp_resource_registration():
-    """Verify that the FastMCP server has registered the heatmap resource."""
-    resources = await mcp.list_resources()
-    assert len(resources) >= 1
+async def test_mcp_server_timeout_error_json_rpc_structure():
+    """Verify handle_mcp_request returns JSON-RPC error when orchestrator raises TimeoutError."""
+    mock_orchestrator = AsyncMock()
+    mock_orchestrator.k8s_client_configured = True
+    mock_orchestrator.optimize_and_profile.side_effect = TimeoutError(
+        "Sandbox execution timed out after 180 seconds."
+    )
 
-    uris = [str(r.uri) for r in resources]
-    assert "mvcp://heatmap/latest" in uris
+    server = MCPServer(orchestrator=mock_orchestrator)
+    req = {
+        "jsonrpc": "2.0",
+        "id": "req-103",
+        "method": "tools/call",
+        "params": {
+            "name": "optimize_kernel",
+            "arguments": {"code": "long_running_code"},
+        },
+    }
 
-
-@pytest.mark.asyncio
-async def test_read_heatmap_resource():
-    """Verify that reading the heatmap resource returns color-coded visual Heatmap cells."""
-    result = await mcp.read_resource("mvcp://heatmap/latest")
-
-    # Access the raw text string inside the ResourceResult contents
-    content_str = result.contents[0].content
-
-    data = json.loads(content_str)
-    assert "heatmap" in data
-    assert "task_id" in data
-    assert len(data["heatmap"]) == 45
-
-    # Assert first-class data elements
-    cells = data["heatmap"]
-    assert any(cell["line"] == 17 for cell in cells)
+    response = await server.handle_mcp_request(req)
+    assert response["jsonrpc"] == "2.0"
+    assert response["id"] == "req-103"
+    assert "error" in response
+    assert response["error"]["code"] == -32603
+    assert "timed out" in response["error"]["message"]

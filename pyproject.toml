@@ -53,4 +53,8 @@ force-single-line = false
 [tool.pytest.ini_options]
 pythonpath = ["."]   # Automatically makes 'src' accessible to all tests
 testpaths = ["tests"] # Restricts test scanning only to the tests folder
+markers = [
+    "kind: End-to-end Kubernetes-in-Docker cluster tests requiring Docker daemon or Kind cluster",
+    "live_cluster: Integration tests targeting live GKE or local Kubernetes clusters via port-forwarding",
+]
 

@@ -1,0 +1,18 @@
+# ==============================================================================
+# Declarative Kind Multi-Node-Pool Cluster Configuration
+# Simulates the two GKE Arm Tau T2A node pools declared in terraform/main.tf
+# ==============================================================================
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+  # Node Pool 1: Arm gVisor Sandboxed Pool (arm-gvisor-sandbox)
+  - role: worker
+    labels:
+      kubernetes.io/arch: arm64
+      mvcp.ai/node-type: arm-gvisor-sandbox
+  # Node Pool 2: Arm Native Baseline Pool (arm-native-baseline)
+  - role: worker
+    labels:
+      kubernetes.io/arch: arm64
+      mvcp.ai/node-type: arm-native-baseline

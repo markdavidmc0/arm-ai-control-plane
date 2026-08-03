@@ -1,11 +1,11 @@
 """Integration tests for Pattern A RPC Dispatcher Bridge and /api/v1/registry/call route."""
 
 import asyncio
+
 import pytest
 from fastapi.testclient import TestClient
 
 from src.control_plane.main import app
-from src.data_plane.worker.arm_tools_bridge import arm_tools
 from src.data_plane.worker.sandbox_runner import DataPlaneSandboxRunner
 from src.data_plane.worker.tool_dispatcher import LocalToolDispatcher
 
@@ -13,9 +13,23 @@ client = TestClient(app)
 
 
 @pytest.mark.asyncio
-async def test_local_tool_dispatcher_compiler_kernel():
-    """Verify LocalToolDispatcher dispatches kernel compilation profiler tool calls."""
-    dispatcher = LocalToolDispatcher()
+async def test_local_tool_dispatcher_compiler_kernel(monkeypatch, tmp_path):
+    """Verify LocalToolDispatcher dispatches kernel compilation profiler tool calls via local binary driver."""
+    tools_dir = str(tmp_path)
+    driver_file = tmp_path / "compiler_driver"
+    driver_file.write_text("#!/bin/sh\nexit 0")
+    driver_file.chmod(0o755)
+
+    async def mock_subprocess(*args, **kwargs):
+        class MockProcess:
+            async def communicate(self):
+                return (b'{"status": "success", "sme2_utilization_pct": 82.4}', b"")
+
+        return MockProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", mock_subprocess)
+
+    dispatcher = LocalToolDispatcher(tools_dir=tools_dir)
     res = await dispatcher.dispatch_tool_call(
         "profile_and_optimize_kernel", {"source_code": "void matmul() {}"}
     )
@@ -26,14 +40,32 @@ async def test_local_tool_dispatcher_compiler_kernel():
 
 
 @pytest.mark.asyncio
-async def test_local_tool_dispatcher_search_meta_tool():
-    """Verify LocalToolDispatcher dispatches mcp__search_tools meta-tool calls."""
-    dispatcher = LocalToolDispatcher()
+async def test_local_tool_dispatcher_search_meta_tool(tmp_path):
+    """Verify LocalToolDispatcher dispatches mcp__search_tools meta-tool calls against catalog.json."""
+    tools_dir = str(tmp_path)
+    catalog_file = tmp_path / "catalog.json"
+    import json
+
+    catalog_file.write_text(
+        json.dumps(
+            {
+                "tools": [
+                    {
+                        "name": "vectorization_tool",
+                        "description": "Arm SIMD auto-vectorization optimizer",
+                    }
+                ]
+            }
+        )
+    )
+
+    dispatcher = LocalToolDispatcher(tools_dir=tools_dir)
     res = await dispatcher.dispatch_tool_call("mcp__search_tools", {"query": "vectorization"})
 
     assert res["jsonrpc"] == "2.0"
     assert res["result"]["status"] == "SUCCESS"
-    assert isinstance(res["result"]["matches"], list)
+    assert len(res["result"]["matches"]) == 1
+    assert res["result"]["matches"][0]["name"] == "vectorization_tool"
 
 
 def test_mcp_registry_call_endpoint():
