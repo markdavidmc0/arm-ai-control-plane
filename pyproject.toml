@@ -54,9 +54,9 @@ force-single-line = false
 pythonpath = ["."]   # Automatically makes 'src' accessible to all tests
 testpaths = ["tests"] # Restricts test scanning only to the tests folder
 markers = [
-    "kind: End-to-end Kubernetes-in-Docker cluster tests requiring Docker daemon or Kind cluster",
+    "kind: marks tests requiring a live KinD Kubernetes cluster",
     "live_cluster: Integration tests targeting live GKE or local Kubernetes clusters via port-forwarding",
-    "smoke: Fast execution (< 10s total runtime) HTTP and RPC checks",
-    "heavy: Deep integration scenario tests for security isolation, scheduling, and benchmarking",
+    "smoke: Fast execution (<10s) gateway readiness and RPC checks.",
+    "heavy: marks slow, multi-turn agent benchmark scenarios",
 ]
 

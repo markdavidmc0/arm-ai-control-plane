@@ -28,7 +28,7 @@ jobs:
       - name: Run Pytest Test Suite
         run: |
           uv sync
-          uv run pytest -m "not kind"
+          uv run pytest -m "not kind and not heavy" --ignore=tests/e2e
 
   kind-e2e-test:
     name: E2E Kind Kubernetes Integration Tests
@@ -61,12 +61,13 @@ jobs:
           kubectl apply -f .platform/deployments/in-house-mcp-servers.yaml
           kubectl rollout status deployment/mvcp-gateway-deployment --timeout=120s || true
 
-      - name: Run E2E Kind Integration Tests
+      - name: Run Fast E2E Gateway Smoke Tests
         env:
           E2E_TARGET: kind
+          GATEWAY_BASE_URL: http://localhost:8080
         run: |
           uv sync
-          uv run pytest tests/test_e2e_platform.py -v
+          uv run pytest tests/e2e/test_smoke.py -v
 
   build-and-deploy:
     name: Build Container Images & Trigger Kubernetes Rolling Update

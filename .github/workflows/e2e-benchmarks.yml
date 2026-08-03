@@ -1,0 +1,51 @@
+name: Platform E2E Heavy Benchmarks
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # Nightly at 02:00 UTC
+  workflow_dispatch:
+  pull_request:
+    types: [labeled]
+
+jobs:
+  heavy-e2e-benchmark:
+    name: Run Heavy Agent Benchmarks (KinD)
+    if: |
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-benchmarks'))
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv Package Manager
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Create multi-node-pool kind Kubernetes Cluster
+        uses: helm/kind-action@v1.10.0
+        with:
+          cluster_name: kind-e2e-cluster
+          config: .platform/deployments/kind-config.yaml
+
+      - name: Apply Platform Kubernetes & Envoy Manifests
+        run: |
+          kubectl apply -f .platform/deployments/gateway-and-envoy.yaml
+          kubectl apply -f .platform/deployments/in-house-mcp-servers.yaml
+          kubectl rollout status deployment/mvcp-gateway-deployment --timeout=180s
+
+      - name: Run Heavy E2E Agent Benchmarks
+        env:
+          E2E_TARGET: kind
+          GATEWAY_BASE_URL: http://localhost:8080
+        run: |
+          uv sync
+          uv run pytest tests/e2e/test_scenarios.py -v -m "heavy"

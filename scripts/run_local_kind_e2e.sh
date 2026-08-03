@@ -40,7 +40,7 @@ kubectl rollout status deployment/mvcp-gateway-deployment --timeout=120s || true
 
 # 3. Run E2E Test Suite
 echo -e "\n${CYAN}[3/3] Executing E2E Platform Test Suite against Kind cluster...${NC}"
-E2E_TARGET=kind uv run pytest tests/test_e2e_platform.py -v
+E2E_TARGET=kind uv run pytest tests/e2e/ -v
 
 echo -e "\n${GREEN}====================================================================${NC}"
 echo -e "${GREEN}   LOCAL KIND E2E PLATFORM TESTS COMPLETED SUCCESSFULLY!             ${NC}"
