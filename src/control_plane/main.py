@@ -7,14 +7,13 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from src.control_plane.mcp_server import MCPServer
 from src.control_plane.orchestrator import SandboxOrchestrator
 
-# Import new APIRouters
+# Import APIRouters
 from src.control_plane.routers.auth import router as auth_router
 from src.control_plane.routers.llm_proxy import router as llm_proxy_router
 from src.control_plane.routers.mcp_registry import router as mcp_registry_router
-from src.control_plane.routers.sandbox import router as sandbox_router
+from src.control_plane.services.mcp_server import MCPServer, mcp
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
@@ -35,10 +34,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register Control Plane Routers
+# Register Consolidated Control Plane Routers
 app.include_router(auth_router)
 app.include_router(mcp_registry_router)
-app.include_router(sandbox_router)
 app.include_router(llm_proxy_router)
 
 # Instantiate Core Engines
@@ -46,7 +44,6 @@ orchestrator = SandboxOrchestrator()
 mcp_server = MCPServer(orchestrator=orchestrator)
 
 # Mount the FastMCP Streamable HTTP / SSE Sub-Application
-from src.control_plane.mcp_server import mcp
 
 app.mount("/mcp", mcp.http_app())
 
@@ -126,7 +123,10 @@ async def handle_streamable_mcp(payload: MCPJsonRPCRequest):
         except Exception as e:
             error_frame = {
                 "jsonrpc": "2.0",
-                "error": {"code": -32603, "message": f"Stream connection crashed: {str(e)}"},
+                "error": {
+                    "code": -32603,
+                    "message": f"Stream connection crashed: {str(e)}",
+                },
             }
             yield json.dumps(error_frame) + "\n"
 

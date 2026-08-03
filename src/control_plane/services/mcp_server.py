@@ -32,10 +32,9 @@ class MCPServer:
             tool_dispatcher: An optional LocalToolDispatcher instance.
         """
         from src.control_plane.orchestrator import SandboxOrchestrator
-        from src.data_plane.worker.tool_dispatcher import LocalToolDispatcher
 
         self.orchestrator = orchestrator or SandboxOrchestrator()
-        self.dispatcher = tool_dispatcher or LocalToolDispatcher()
+        self.dispatcher = tool_dispatcher
 
     async def handle_mcp_request(self, request_body: dict[str, Any]) -> dict[str, Any]:
         """Processes standard MCP JSON-RPC 2.0 request payloads.
@@ -85,7 +84,42 @@ class MCPServer:
 
     async def _list_tools(self) -> dict[str, Any]:
         """Dynamically fetches available tool definitions from the Data Plane catalog."""
-        catalog_tools = await self.dispatcher._read_catalog()
+        if self.dispatcher:
+            catalog_tools = await self.dispatcher._read_catalog()
+        else:
+            import json
+            import os
+
+            catalog_path = os.environ.get("ARM_TOOLS_CATALOG", "/opt/arm-tools/catalog.json")
+            if os.path.exists(catalog_path):
+                try:
+                    with open(catalog_path, encoding="utf-8") as f:
+                        data = json.load(f)
+                        catalog_tools = data.get("tools", [])
+                except Exception:
+                    catalog_tools = []
+            else:
+                catalog_tools = [
+                    {
+                        "name": "optimize_kernel",
+                        "description": "Cross-compiles and optimizes kernel code within a sandboxed data plane.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {"code": {"type": "string"}},
+                            "required": ["code"],
+                        },
+                    },
+                    {
+                        "name": "profile_and_optimize_kernel",
+                        "description": "Cross-compiles and benchmarks C++ matrix kernels in a remote gVisor sandbox.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {"source_code": {"type": "string"}},
+                            "required": ["source_code"],
+                        },
+                    },
+                ]
+
         tools_schema = []
         for tool in catalog_tools:
             tools_schema.append(
@@ -126,8 +160,12 @@ class MCPServer:
                 ]
             }
 
-        # Otherwise, delegate directly to the Data Plane tool dispatcher
-        dispatch_res = await self.dispatcher.dispatch_tool_call(tool_name, arguments)
+        # Direct dispatch to provided dispatcher or orchestrator
+        if self.dispatcher:
+            dispatch_res = await self.dispatcher.dispatch_tool_call(tool_name, arguments)
+        else:
+            dispatch_res = await self.orchestrator.dispatch_dataplane_tool(tool_name, arguments)
+
         return {
             "content": [
                 {

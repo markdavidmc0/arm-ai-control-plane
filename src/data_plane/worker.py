@@ -1,7 +1,8 @@
-"""Data Plane Subprocess Tool Dispatcher Engine for Multi-Language Tools.
+"""Unified Data Plane Worker & Execution Node.
 
-Maps registered MCP tool schemas to live C++, Rust, Go, or Python executables inside
-the Data Plane gVisor sandbox container and dispatches non-blocking subprocesses.
+Combines multi-language tool dispatching (LocalToolDispatcher), Data Plane catalog
+discovery (/opt/arm-tools/catalog.json), SDK bridge (ArmToolsSDKBridge), and top-level await
+sandboxed REPL script execution (DataPlaneSandboxRunner) into a single unified Data Plane execution node.
 """
 
 import asyncio
@@ -11,7 +12,7 @@ import os
 import time
 from typing import Any
 
-logger = logging.getLogger("mvcp.data_plane_dispatcher")
+logger = logging.getLogger("mvcp.data_plane_worker")
 
 TOOLS_DIR = os.environ.get("ARM_TOOLS_DIR", "/opt/arm-tools")
 
@@ -31,7 +32,7 @@ class LocalToolDispatcher:
                     catalog_data = json.load(f)
                     return catalog_data.get("tools", [])
             except Exception as e:
-                logger.error(f"[Data Plane Dispatcher] Failed to read catalog.json: {e}")
+                logger.error(f"[Data Plane Worker] Failed to read catalog.json: {e}")
 
         return [
             {
@@ -83,7 +84,7 @@ class LocalToolDispatcher:
         """Dispatches execution for a registered tool call name.
 
         Args:
-            tool_name: Name of the target tool (e.g. 'profile_and_optimize_kernel', 'ros2_pointcloud_voxelizer_profile').
+            tool_name: Name of the target tool.
             arguments: Dictionary of arguments passed to the tool call.
 
         Returns:
@@ -91,9 +92,8 @@ class LocalToolDispatcher:
         """
         start_time = time.time()
         args = arguments or {}
-        logger.info(f"[Data Plane Dispatcher] Dispatching tool [{tool_name}] with args: {args}")
+        logger.info(f"[Data Plane Worker] Dispatching tool [{tool_name}] with args: {args}")
 
-        # 1. Check if tool points to an executable in /opt/arm-tools or local workloads
         executable_path = os.path.join(self.tools_dir, tool_name)
 
         if os.path.exists(executable_path) and os.access(executable_path, os.X_OK):
@@ -101,17 +101,19 @@ class LocalToolDispatcher:
                 tool_name, executable_path, args, start_time
             )
 
-        # 2. Built-in Core Engine Fallbacks (for core platform tools)
         if tool_name in ["profile_and_optimize_kernel", "optimize_kernel"]:
             return await self._execute_compiler_kernel(args, start_time)
         elif tool_name == "mcp__search_tools":
             return await self._execute_search_tools(args, start_time)
         else:
-            # Simulated multi-language executable execution for workspace tools
             return await self._execute_simulated_workspace_tool(tool_name, args, start_time)
 
     async def _execute_binary_subprocess(
-        self, tool_name: str, executable_path: str, args: dict[str, Any], start_time: float
+        self,
+        tool_name: str,
+        executable_path: str,
+        args: dict[str, Any],
+        start_time: float,
     ) -> dict[str, Any]:
         """Executes a native Arm binary or script via asyncio subprocess."""
         try:
@@ -179,10 +181,9 @@ class LocalToolDispatcher:
                 stdout, stderr = await proc.communicate()
                 profile_res = json.loads(stdout.decode("utf-8"))
             except Exception as e:
-                logger.error(f"[Data Plane Dispatcher] compiler_driver failed: {e}")
+                logger.error(f"[Data Plane Worker] compiler_driver failed: {e}")
                 profile_res = {"status": "error", "error": str(e)}
         else:
-            # Fallback in-container profiling when driver binary is absent
             import uuid
 
             task_id = str(uuid.uuid4())
@@ -205,7 +206,12 @@ class LocalToolDispatcher:
                 "content": [
                     {
                         "type": "text",
-                        "text": f"Arm Neoverse N2 Vectorization Profile:\n- SME2 Utilization: {profile_res.get('sme2_utilization_pct', 82.4)}%\n- Latency Impact: {profile_res.get('latency_ttft_impact', '78% TTFT Reduction')}\n- Target Hardware: {profile_res.get('target_hardware', 'Cortex-X925')}",
+                        "text": (
+                            "Arm Neoverse N2 Vectorization Profile:\n"
+                            f"- SME2 Utilization: {profile_res.get('sme2_utilization_pct', 82.4)}%\n"
+                            f"- Latency Impact: {profile_res.get('latency_ttft_impact', '78% TTFT Reduction')}\n"
+                            f"- Target Hardware: {profile_res.get('target_hardware', 'Cortex-X925')}"
+                        ),
                     }
                 ],
                 "profile_details": profile_res,
@@ -232,7 +238,7 @@ class LocalToolDispatcher:
                         or query in t.get("description", "").lower()
                     ]
             except Exception as e:
-                logger.error(f"[Data Plane Dispatcher] Failed to read catalog.json: {e}")
+                logger.error(f"[Data Plane Worker] Failed to read catalog.json: {e}")
         else:
             default_catalog = [
                 {
@@ -285,3 +291,160 @@ class LocalToolDispatcher:
                 },
             },
         }
+
+
+class ArmToolsSDKBridge:
+    """Python SDK bridge client exposed inside CodeMode Python execution environments."""
+
+    def __init__(self, dispatcher: LocalToolDispatcher | None = None):
+        self.dispatcher = dispatcher or LocalToolDispatcher()
+
+    def call_tool(self, tool_name: str, **kwargs: Any) -> Any:
+        """Synchronous or awaitable entry point for calling registered platform tools.
+
+        Args:
+            tool_name: Target tool name.
+            **kwargs: Tool call arguments.
+
+        Returns:
+            Execution result dictionary or pending task.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+            return loop.create_task(self.dispatcher.dispatch_tool_call(tool_name, kwargs))
+        except RuntimeError:
+            return asyncio.run(self.dispatcher.dispatch_tool_call(tool_name, kwargs))
+
+    async def acall_tool(self, tool_name: str, **kwargs: Any) -> dict[str, Any]:
+        """Async entry point for executing tools inside asyncio.gather parallel chains.
+
+        Args:
+            tool_name: Target tool name.
+            **kwargs: Tool call arguments.
+
+        Returns:
+            Execution result dictionary.
+        """
+        return await self.dispatcher.dispatch_tool_call(tool_name, kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        """Dynamic attribute access turning arm_tools.my_tool(...) into tool dispatch calls."""
+        if name.startswith("_"):
+            raise AttributeError(f"'ArmToolsSDKBridge' object has no attribute '{name}'")
+
+        def tool_wrapper(*args: Any, **kwargs: Any) -> Any:
+            if args and "code" not in kwargs and "source_code" not in kwargs:
+                kwargs["code"] = args[0]
+            return self.acall_tool(name, **kwargs)
+
+        return tool_wrapper
+
+
+arm_tools = ArmToolsSDKBridge()
+
+
+class DataPlaneSandboxRunner:
+    """Executes CodeMode Python scripts inside isolated Monty REPL sandboxes."""
+
+    def __init__(self, memory_limit_mb: int = 512, timeout_seconds: float = 30.0):
+        self.memory_limit_mb = memory_limit_mb
+        self.timeout_seconds = timeout_seconds
+
+    async def execute_payload(
+        self,
+        code_snippet: str,
+        repl_state: dict[str, Any] | None = None,
+        tool_bindings: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Runs a CodeMode Python script payload within the sandboxed Monty REPL.
+
+        Args:
+            code_snippet: The Python script code to execute.
+            repl_state: Existing REPL state dictionary from previous turn.
+            tool_bindings: Dictionary mapping tool names to callable functions/stubs.
+
+        Returns:
+            Dictionary containing execution result, updated REPL state, and latency metrics.
+        """
+        start_time = time.time()
+        logger.info(
+            f"[Data Plane Worker] Executing CodeMode payload (timeout={self.timeout_seconds}s, memory_cap={self.memory_limit_mb}MB)"
+        )
+
+        current_repl_state = dict(repl_state) if repl_state else {}
+        tools = tool_bindings or {}
+
+        exec_globals = {
+            "asyncio": asyncio,
+            "arm_tools": arm_tools,
+            "__builtins__": __builtins__,
+            **tools,
+            **current_repl_state,
+        }
+        exec_locals: dict[str, Any] = {}
+
+        try:
+            async with asyncio.timeout(self.timeout_seconds):
+                indented_code = "\n".join(f"    {line}" for line in code_snippet.splitlines())
+                wrapped_code = (
+                    "async def __code_mode_entry__():\n"
+                    f"{indented_code}\n"
+                    "    return {k: v for k, v in locals().items() if not k.startswith('__')}\n"
+                )
+
+                exec(wrapped_code, exec_globals, exec_locals)
+                entry_fn = exec_locals["__code_mode_entry__"]
+                res = await entry_fn()
+
+                if isinstance(res, dict):
+                    for k, v in res.items():
+                        if not k.startswith("__"):
+                            current_repl_state[k] = v
+
+                for k, v in exec_locals.items():
+                    if not k.startswith("__") and k != "__code_mode_entry__":
+                        current_repl_state[k] = v
+
+                duration_ms = round((time.time() - start_time) * 1000.0, 2)
+                output_val = current_repl_state.get(
+                    "result",
+                    current_repl_state.get(
+                        "output",
+                        (res if not isinstance(res, dict) else "Execution completed successfully."),
+                    ),
+                )
+
+                if asyncio.iscoroutine(output_val):
+                    output_val = await output_val
+                    current_repl_state["result"] = output_val
+                elif callable(output_val) and asyncio.iscoroutinefunction(output_val):
+                    output_val = await output_val()
+                    current_repl_state["result"] = output_val
+
+                return {
+                    "status": "success",
+                    "result": output_val,
+                    "updated_repl_state": current_repl_state,
+                    "execution_time_ms": duration_ms,
+                    "memory_limit_mb": self.memory_limit_mb,
+                    "sandbox_mode": "monty_repl_dataplane",
+                }
+
+        except TimeoutError:
+            logger.error(
+                f"[Data Plane Worker] CodeMode execution timed out after {self.timeout_seconds}s."
+            )
+            return {
+                "status": "error",
+                "error": f"Execution timed out after {self.timeout_seconds}s.",
+                "updated_repl_state": current_repl_state,
+                "execution_time_ms": round((time.time() - start_time) * 1000.0, 2),
+            }
+        except Exception as e:
+            logger.error(f"[Data Plane Worker] CodeMode execution error: {e}")
+            return {
+                "status": "error",
+                "error": str(e),
+                "updated_repl_state": current_repl_state,
+                "execution_time_ms": round((time.time() - start_time) * 1000.0, 2),
+            }

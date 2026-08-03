@@ -1,8 +1,24 @@
-"""Control Plane API Request and Response Pydantic Schemas."""
+"""Control Plane API Request and Response Pydantic Schemas & Type Definitions."""
 
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+
+@dataclass
+class ArmPlatformDeps:
+    """Dependency injection container passed to Pydantic AI agent runs.
+
+    Holds active session tokens, user/workspace metadata, and references
+    to orchestrator & multiplexer services.
+    """
+
+    session_id: str
+    workspace_context: str = "cloud-ai"
+    user_id: str = "default-user"
+    mcp_multiplexer: Any = None
+    orchestrator: Any = None
 
 
 class MCPJsonRPCRequest(BaseModel):

@@ -32,13 +32,12 @@
     },
     {
       "name": "profile_and_optimize_kernel",
-      "description": "Cross-compiles and profiles C++ inference kernels on Cortex-X925 target using Arm KleidiAI / NEON.",
+      "description": "Cross-compiles and benchmarks C++ matrix kernels in a remote gVisor sandbox.",
       "parameters": {
         "type": "object",
         "properties": {
           "source_code": {
-            "type": "string",
-            "description": "C++ matrix or inference kernel source code."
+            "type": "string"
           }
         },
         "required": [
