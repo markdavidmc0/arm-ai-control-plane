@@ -16,6 +16,10 @@ jobs:
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-benchmarks'))
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: 'read'
+      id-token: 'write' # Required for requesting OIDC JWT token from GitHub
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
