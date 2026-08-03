@@ -3,7 +3,7 @@
 import asyncio
 import pytest
 
-from src.control_plane.services.agent_factory import DummyCodeModeCapability, create_arm_agent
+from src.control_plane.services.agent_factory import create_arm_agent
 from src.control_plane.services.mcp_multiplexer import MCPMultiplexerService
 from src.data_plane.worker.sandbox_runner import DataPlaneSandboxRunner
 
@@ -54,9 +54,13 @@ async def test_prompt_cache_preservation():
         assert capability.dynamic_catalog is True
         assert capability.tools == {"code_mode": True}
     else:
-        # Pydantic AI Agent mode
-        capabilities = getattr(agent, "capabilities", [])
-        assert len(capabilities) > 0
+        # Pydantic AI Agent mode (capabilities stored in root_capability)
+        root_cap = getattr(agent, "root_capability", None) or getattr(agent, "_root_capability", None)
+        assert root_cap is not None
+        cap_list = getattr(root_cap, "capabilities", [root_cap])
+        code_mode_caps = [c for c in cap_list if "CodeMode" in c.__class__.__name__ or hasattr(c, "dynamic_catalog")]
+        assert len(code_mode_caps) > 0
+        assert getattr(code_mode_caps[0], "dynamic_catalog", True) is True
 
 
 @pytest.mark.asyncio
