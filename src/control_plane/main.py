@@ -139,7 +139,7 @@ async def health_check():
     return HealthStatusResponse(
         status="healthy",
         gke_orchestrator_connected=orchestrator.k8s_client_configured,
-        identity_layer="tailscale_tsnet",
+        identity_layer="keycloak_wif",
     )
 
 

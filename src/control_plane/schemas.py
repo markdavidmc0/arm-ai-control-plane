@@ -57,7 +57,9 @@ class HealthStatusResponse(BaseModel):
     gke_orchestrator_connected: bool = Field(
         ..., description="Whether GKE Kubernetes API client is connected"
     )
-    identity_layer: str = Field("tailscale_tsnet", description="Identity and mesh network provider")
+    identity_layer: str = Field(
+        "keycloak_wif", description="Identity and OIDC Workload Identity Federation provider"
+    )
 
 
 class SSETeardownResponse(BaseModel):

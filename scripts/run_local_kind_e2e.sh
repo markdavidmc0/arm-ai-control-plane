@@ -32,6 +32,7 @@ kind create cluster --name $CLUSTER_NAME --config .platform/deployments/kind-con
 
 # 2. Deploy Platform Manifests
 echo -e "\n${CYAN}[2/3] Deploying Gateway, Envoy, and MCP Server manifests to Kind...${NC}"
+kubectl apply -f .platform/deployments/runtime-class.yaml
 kubectl apply -f .platform/deployments/gateway-and-envoy.yaml
 kubectl apply -f .platform/deployments/in-house-mcp-servers.yaml
 

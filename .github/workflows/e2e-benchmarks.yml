@@ -67,6 +67,7 @@ jobs:
       - name: Apply Platform Kubernetes & Envoy Manifests
         run: |
           kubectl wait --for=condition=Ready nodes --all --timeout=60s
+          kubectl apply -f .platform/deployments/runtime-class.yaml
           kubectl apply -f .platform/deployments/gateway-and-envoy.yaml
           kubectl apply -f .platform/deployments/in-house-mcp-servers.yaml
           kubectl rollout status deployment/mvcp-gateway-deployment --timeout=180s

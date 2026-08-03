@@ -44,7 +44,7 @@ check_dependency kubectl
 validate_config() {
     info "Validating configuration file: ${CONFIG_FILE}"
     if [[ ! -f "$CONFIG_FILE" ]]; then
-        error "Configuration file 'config/provision_config.json' was not found!\n\n  \033[1;33m[HOW TO FIX THIS]\033[0m\n  1. Create a local copy of your config template:\n     \033[1;36mcp config/provision_config.template.json config/provision_config.json\033[0m\n  2. Open \033[1;32mconfig/provision_config.json\033[0m and populate your project ID, region, and Tailscale keys.\n  3. Re-run your desired command (e.g., ./scripts/provision_and_test.sh --dry-run)"
+        error "Configuration file 'config/provision_config.json' was not found!\n\n  \033[1;33m[HOW TO FIX THIS]\033[0m\n  1. Create a local copy of your config template:\n     \033[1;36mcp config/provision_config.template.json config/provision_config.json\033[0m\n  2. Open \033[1;32mconfig/provision_config.json\033[0m and populate your project ID and region.\n  3. Re-run your desired command (e.g., ./scripts/provision_and_test.sh --dry-run)"
     fi
 }
 

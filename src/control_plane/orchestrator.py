@@ -120,15 +120,6 @@ class SandboxOrchestrator:
                         self._generate_sandbox_bootstrap_command(cxx_code),
                     ],
                     "env": [
-                        {
-                            "name": "TS_AUTHKEY",
-                            "value_from": {
-                                "secretKeyRef": {
-                                    "name": "tailscale-secret",
-                                    "key": "TS_AUTHKEY",
-                                }
-                            },
-                        },
                         {"name": "TASK_ID", "value": task_id},
                     ],
                     "volumeMounts": volume_mounts,

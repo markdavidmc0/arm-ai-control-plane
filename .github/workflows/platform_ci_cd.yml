@@ -87,6 +87,7 @@ jobs:
 
       - name: Apply Kubernetes Rolling Update (Zero Downtime)
         run: |
+          kubectl apply -f .platform/deployments/runtime-class.yaml
           kubectl apply -f .platform/deployments/coredns-custom.yaml
           kubectl apply -f .platform/deployments/internal-https-proxy.yaml
           kubectl apply -f .platform/deployments/keycloak.yaml

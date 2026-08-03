@@ -232,13 +232,45 @@ def test_upstream_mcp_server_registration_and_search(test_client):
     assert call_data["result"]["status"] == "SUCCESS"
 
 
+def test_keycloak_jwt_verification_valid():
+    """Verify valid Keycloak OIDC JWT is correctly decoded and approved by AuthService."""
+    service = AuthService()
+    valid_jwt = service.mint_keycloak_jwt()
+    payload = service.verify_jwt_token(valid_jwt)
+
+    assert payload is not None
+    assert payload["iss"] == "https://keycloak.internal/realms/arm-platform"
+    assert "mcp-registrar" in payload["realm_access"]["roles"]
+
+
+def test_keycloak_jwt_verification_expired():
+    """Verify expired Keycloak OIDC JWT throws 401 / returns None."""
+    import time
+    service = AuthService()
+
+    # Construct an expired JWT (exp set to 1 hour ago)
+    header_b64 = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleWNsb2FrLW1hbC0xIn0"
+    expired_payload = {
+        "exp": int(time.time()) - 3600,
+        "iss": "https://keycloak.internal/realms/arm-platform",
+        "sub": "expired_m2m_runner",
+    }
+    import base64
+    import json
+    payload_b64 = base64.urlsafe_b64encode(json.dumps(expired_payload).encode()).decode().rstrip("=")
+    expired_jwt = f"{header_b64}.{payload_b64}.mock_signature"
+
+    payload = service.verify_jwt_token(expired_jwt)
+    assert payload is None
+
+
 # ==============================================================================
 # 3. LLM Completion Proxy Tests
 # ==============================================================================
 
 
 def test_llm_proxy_headers(test_client):
-    """Verify /v1/chat/completions injects X-LLM-Cost-USD and X-LLM-Prompt-Tokens headers."""
+    """Verify /v1/chat/completions injects X-LLM-Cost-USD and token metadata headers."""
     response = test_client.post(
         "/v1/chat/completions",
         json={
@@ -254,4 +286,6 @@ def test_llm_proxy_headers(test_client):
     assert response.status_code == 200
     assert "X-LLM-Cost-USD" in response.headers
     assert "X-LLM-Prompt-Tokens" in response.headers
+    assert "X-LLM-Completion-Tokens" in response.headers
     assert "X-LLM-Latency-MS" in response.headers
+    assert "X-LLM-Provider" in response.headers

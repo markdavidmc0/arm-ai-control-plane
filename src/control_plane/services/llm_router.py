@@ -4,6 +4,7 @@ Forwards `/v1/chat/completions` requests to multi-provider backends (Anthropic, 
 using `litellm.acompletion`. Computes costs via `completion_cost` and injects telemetry headers:
 - `X-LLM-Cost-USD`
 - `X-LLM-Prompt-Tokens`
+- `X-LLM-Completion-Tokens`
 - `X-LLM-Latency-MS`
 - `X-LLM-Provider`
 """
@@ -15,16 +16,14 @@ from typing import Any
 
 import litellm
 
-from src.control_plane.services.auth_service import AuthService
-
 logger = logging.getLogger("mvcp.llm_router")
 
 
 class LLMRouterService:
     """Async cloud-agnostic proxy router for LLM completions with cost header injection."""
 
-    def __init__(self, auth_service: AuthService | None = None):
-        self.auth_service = auth_service or AuthService()
+    def __init__(self, auth_service: Any | None = None):
+        self.auth_service = auth_service
 
     async def route_completion(
         self, request_data: dict[str, Any]
@@ -54,13 +53,11 @@ class LLMRouterService:
         gcp_project = os.environ.get("GCP_PROJECT_ID", "sovereign-ai-495715")
         gcp_location = os.environ.get("GCP_LOCATION", "us-central1")
 
-        # Inject GCP STS credentials for Vertex AI / Gemini routing
+        # Vertex AI / Gemini routing using ambient GKE Workload Identity / ADC
         if model.startswith("vertex_ai") or "gemini" in model.lower():
-            sts_token = await self.auth_service.get_gcp_sts_token()
             completion_kwargs["custom_llm_provider"] = "vertex_ai"
-            completion_kwargs["vertex_credentials"] = sts_token
-            completion_kwargs["project"] = gcp_project
-            completion_kwargs["location"] = gcp_location
+            completion_kwargs["vertex_project"] = gcp_project
+            completion_kwargs["vertex_location"] = gcp_location
 
         # Optional parameters to forward if present
         for param in ["temperature", "top_p", "max_tokens", "tools", "stream"]:
@@ -105,6 +102,7 @@ class LLMRouterService:
         # Token usage extraction
         usage = response_payload.get("usage", {}) or {}
         prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
 
         # Model / Provider identification
         provider_name = response_payload.get("model", model) or "arm-mvcp-gateway"
@@ -112,6 +110,7 @@ class LLMRouterService:
         headers = {
             "X-LLM-Cost-USD": str(cost_usd),
             "X-LLM-Prompt-Tokens": str(prompt_tokens),
+            "X-LLM-Completion-Tokens": str(completion_tokens),
             "X-LLM-Latency-MS": str(latency_ms),
             "X-LLM-Provider": str(provider_name),
         }
