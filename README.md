@@ -1,108 +1,100 @@
-# 🛡️ Arm Federated AI Control Plane (MVCP)
+# 🛡️ Arm Federated AI Control Plane & Data Plane Platform
 
-[![Platform Control Plane CI/CD Pipeline](https://github.com/markdavidmc0/arm-ai-control-plane/actions/workflows/platform_ci_cd.yml/badge.svg)](https://github.com/markdavidmc0/arm-ai-control-plane/actions/workflows/platform_ci_cd.yml)
+[![Fast CI Gate](https://github.com/markdavidmc0/arm-ai-control-plane/actions/workflows/platform_ci_cd.yml/badge.svg)](https://github.com/markdavidmc0/arm-ai-control-plane/actions/workflows/platform_ci_cd.yml)
+[![E2E Heavy Benchmarks](https://github.com/markdavidmc0/arm-ai-control-plane/actions/workflows/e2e-benchmarks.yml/badge.svg)](https://github.com/markdavidmc0/arm-ai-control-plane/actions/workflows/e2e-benchmarks.yml)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
-[![Arm Tau T2A](https://img.shields.io/badge/architecture-Arm64-orange.svg)](https://cloud.google.com/compute/docs/general-purpose-machines#t2a_machines)
-[![gVisor Sandbox](https://img.shields.io/badge/sandbox-gVisor-green.svg)](https://gvisor.dev/)
+[![Arm Tau T2A](https://img.shields.io/badge/architecture-Arm64--Neoverse--N2-orange.svg)](https://cloud.google.com/compute/docs/general-purpose-machines#t2a_machines)
+[![gVisor Sandbox](https://img.shields.io/badge/sandbox-gVisor--runsc-green.svg)](https://gvisor.dev/)
+[![Model Context Protocol](https://img.shields.io/badge/protocol-MCP--JSON--RPC--2.0-purple.svg)](https://modelcontextprotocol.io/)
 
-An enterprise-grade, zero-trust **Master Model Context Protocol (MVCP) Control Plane** optimized for **Arm Neoverse / Tau T2A architecture** running on Google Kubernetes Engine (GKE) with gVisor sandbox isolation.
+An enterprise-grade, zero-trust **Federated Model Context Protocol (MCP) Control Plane & Data Plane Platform** engineered for **64-bit Arm Neoverse / Tau T2A architectures**. Combines gVisor micro-kernel sandboxing, workspace-context prompt slicing, CodeMode REPL execution, and federated MCP server aggregation on Google Kubernetes Engine (GKE).
 
 ---
 
-## 🏛️ System Architecture
+## 🏛️ Core Architecture Flow (Control Plane vs. Data Plane)
+
+The platform enforces strict architectural separation between the **Thick Gateway Control Plane** (protocol translation, zero code execution, authentication, workspace slicing, LLM proxying) and the **Isolated Data Plane** (sandboxed execution, C++/Python profiling, native tool drivers).
 
 ```
-                                 ┌──────────────────────────────────────────────┐
-                                 │              Private VPC Network             │
-                                 │            (mvcp-vpc-network)                │
-                                 │                                              │
- ┌──────────────────────┐  OIDC  │  ┌─────────────────┐    ┌─────────────────┐  │
- │ GitHub Actions CI/CD │ ───────┼─>│ Keycloak (OIDC) │    │  MVCP Gateway   │  │
- │ (mvcp-github-ci-sa)  │        │  │ keycloak.arm.   │    │ gateway.arm.    │  │
- └──────────────────────┘        │  │    internal     │    │    internal     │  │
-                                 │  └────────┬────────┘    └────────┬────────┘  │
-                                 │           │                      │           │
-                                 │           ▼                      ▼           │
-                                 │  ┌────────────────────────────────────────┐  │
-                                 │  │        GKE Internal Ingress (L7)       │  │
-                                 │  │         (arm-platform-ingress)         │  │
-                                 │  └──────────────────┬─────────────────────┘  │
-                                 │                     │                        │
-                                 │                     ▼                        │
-                                 │  ┌────────────────────────────────────────┐  │
-                                 │  │      Envoy Edge Guard (Port 10000)     │  │
-                                 │  └──────────────────┬─────────────────────┘  │
-                                 │                     │                        │
-                                 │                     ▼                        │
-                                 │  ┌────────────────────────────────────────┐  │
-                                 │  │      Arm Sandbox Worker Node Pool      │  │
-                                 │  │   (Arm Tau T2A + gVisor Isolation)     │  │
-                                 │  └────────────────────────────────────────┘  │
-                                 └──────────────────────────────────────────────┘
-```
-
----
-
-## ✨ Key Features
-
-* **🛡️ Arm Tau T2A + gVisor Sandboxing**: Secure, high-throughput container runtime on 64-bit Armv8.2-A processors using gVisor container isolation.
-* **🔑 OAuth2 / OIDC M2M Authentication**: Keycloak machine-to-machine authentication with Google Secret Manager client credential management.
-* **🌐 Private VPC & Cloud DNS**: Zero public internet exposure. Service discovery via private Cloud DNS (`keycloak.arm.internal` and `gateway.arm.internal`).
-* **🚦 Unified GKE Internal Ingress**: Port-free L7 HTTP routing and Container-Native Load Balancing (NEGs).
-* **🤖 Master Model Context Protocol (MCP)**: Automated discovery, dynamic routing, and health monitoring for federated MCP servers.
-* **⚙️ 100% Infrastructure-as-Code**: Fully automated GCP provisioning using Terraform and GitHub Actions OIDC Workload Identity Federation.
-
----
-
-## 🚀 Quick Start
-
-### 1. Local Development & Testing
-
-Install dependencies using `uv` and execute the test suite:
-
-```bash
-# Sync local virtual environment
-uv sync
-
-# Run fast unit test suite (< 2s)
-uv run pytest -m "not kind and not live_cluster"
+                                      CLIENTS & AI AGENTS
+                               (Pydantic AI / CodeMode / FastMCP)
+                                                │
+                                  Bearer JWT / API Key / Headers
+                                                │
+  ┌─────────────────────────────────────────────▼─────────────────────────────────────────────┐
+  │                                   CONTROL PLANE GATEWAY                                   │
+  │                           (src/control_plane/ - Thick Gateway)                            │
+  │                                                                                           │
+  │   ┌────────────────────────┐  ┌─────────────────────────┐  ┌─────────────────────────┐   │
+  │   │      routers/auth      │  │   routers/mcp_registry  │  │    routers/llm_router    │   │
+  │   │  Envoy ext_authz &     │  │  Workspace Slicing &    │  │  Async httpx completion │   │
+  │   │  Keycloak OIDC Tokens  │  │  /execute & /optimize   │  │  /v1/chat/completions   │   │
+  │   └───────────┬────────────┘  └────────────┬────────────┘  └────────────┬────────────┘   │
+  │               │                            │                            │                 │
+  │   ┌───────────▼────────────┐  ┌────────────▼────────────┐  ┌────────────▼────────────┐   │
+  │   │  services/auth_service │  │ services/mcp_multiplexer│  │   services/llm_router   │   │
+  │   │  Salted SHA-256 Keys & │  │  Context Slicing (<1.5k)│  │   Token/Cost Calculator │   │
+  │   │  Rate Limiting         │  │  & Upstream Proxying    │  │   ($3.00/1M baseline)   │   │
+  │   └────────────────────────┘  └────────────┬────────────┘  └─────────────────────────┘   │
+  │                                            │                                              │
+  │                                            ▼                                              │
+  │                                    orchestrator.py                                        │
+  │                         (Async K8s Pod & gVisor RPC Client)                               │
+  └────────────────────────────────────────────┬──────────────────────────────────────────────┘
+                                               │
+                           gVisor Pod Scheduling / Worker Dispatch
+                                               │
+  ┌────────────────────────────────────────────▼──────────────────────────────────────────────┐
+  │                                     DATA PLANE WORKER                                     │
+  │                      (src/data_plane/worker.py - Isolated Sandbox)                        │
+  │                                                                                           │
+  │   ┌──────────────────────────────┐                ┌───────────────────────────────────┐   │
+  │   │    DataPlaneSandboxRunner    │                │        LocalToolDispatcher        │   │
+  │   │  Monty REPL Execution Engine │                │  Catalog (/opt/arm-tools/catalog) │   │
+  │   │  Top-Level Await & State     │                │  Compiler Driver & Subprocesses   │   │
+  │   └──────────────┬───────────────┘                └─────────────────┬─────────────────┘   │
+  │                  │                                                  │                     │
+  │                  └───────────────────────┬──────────────────────────┘                     │
+  │                                          │                                                │
+  │                                          ▼                                                │
+  │                           ┌─────────────────────────────┐                                 │
+  │                           │     ArmToolsSDKBridge       │                                 │
+  │                           │   arm_tools.my_tool(...)    │                                 │
+  │                           │   Parallel asyncio.gather   │                                 │
+  │                           └─────────────────────────────┘                                 │
+  └───────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 🧪 Testing Architecture & Execution
+## 🔒 Sandboxing & Runtime Isolation
 
-The repository features a single, unified, DRY test suite in [tests/test_e2e_platform.py](file:///Users/markmcnaught/Repos/arm-federated-ai/tests/test_e2e_platform.py) that executes across all runtime targets:
+Platform workloads run inside secure, transient micro-kernel sandboxes to guarantee multi-tenant security and zero side-effects on host nodes:
 
-### 1. Fast Unit & API Schema Tests (Default In-Memory)
-Executes fast, offline unit tests, Pydantic schema validations, and mock dispatcher tests in < 2 seconds:
+1. **gVisor (`runsc-arm`) vs Native (`runc-arm`)**:
+   - **gVisor Isolation** (`use_gvisor=True`): Traps system calls inside an application kernel written in Go (`runsc`), executing on dedicated `arm-gvisor-sandbox` Tau T2A node pools.
+   - **Native Baseline** (`use_gvisor=False`): Routes execution directly to `arm-native-baseline` node pools for unconstrained performance benchmarking.
 
-```bash
-uv run pytest
-```
+2. **Read-Only Tool Mounts & Write-Block Enforcement**:
+   - `initContainers` (`tools-installer`) copy tool binaries to `/opt/arm-tools/` during Pod startup.
+   - The primary compiler container mounts `/opt/arm-tools/` as **read-only** (`readOnly: True`), blocking malicious filesystem modifications during script execution.
 
-### 2. End-to-End Kubernetes-in-Docker Tests (`kind`)
-Executes all 5 E2E platform scenario suites (`initContainer` OCI tool mounts, gVisor node pool routing, MCP JSON-RPC loops, CodeMode REPL stats, and read-only volume write-block checks) against a `kind` cluster:
+3. **Resource Caps & Timeouts**:
+   - Pod manifests enforce strict CPU (2 vCPU) and memory limits (2GiB), with a 180-second hard timeout monitored asynchronously via `asyncio.to_thread`.
 
-```bash
-# Automated local Kind setup, manifest deployment, E2E test, and cleanup
-./scripts/run_local_kind_e2e.sh
-```
-*Note: Executed automatically in GitHub Actions CI/CD via `helm/kind-action@v1.10.0`.*
+---
 
-### 3. On-Demand Live Cluster Integration Tests (`live_gke`)
-Executes live end-to-end checks against an active GKE cluster or local cluster. Automatically manages background `kubectl port-forwarding` to `svc/mvcp-gateway-service`:
+## 🚀 Deployment & Infrastructure
 
-```bash
-# Execute against active live GKE cluster
-E2E_TARGET=live_gke uv run pytest tests/test_e2e_platform.py -v
-```
+The infrastructure is declared exclusively in Terraform (`terraform/`) and deployed to Google Cloud Platform:
 
-### 2. Infrastructure Provisioning (Terraform)
-
-Provision the complete GCP infrastructure (VPC, GKE Arm Node Pool, Secret Manager, IAM, Cloud DNS):
+* **Arm Tau T2A GKE Node Pools**: 64-bit Armv8.2-A (Neoverse N2) compute nodes configured with gVisor `RuntimeClass`.
+* **Private VPC & Cloud DNS**: Private service discovery via Cloud DNS (`keycloak.arm.internal` and `gateway.arm.internal`). Zero public IP exposure.
+* **Envoy Edge Guard & Keycloak OIDC**: Envoy sidecar proxies execute zero-trust sidecar authentication checks (`/api/v1/internal/auth-check`) before forwarding traffic.
+* **Secretless OIDC Workload Identity**: CI/CD pipelines authenticate to GCP using OIDC Workload Identity Federation without static JSON key files.
 
 ```bash
+# Provision infrastructure via Terraform
 cd terraform
 terraform init
 terraform apply \
@@ -113,11 +105,75 @@ terraform apply \
 
 ---
 
-## 🔒 Security & Least Privilege
+## 💻 CodeMode REPL & Agent Execution
 
-* **Workload Identity**: In-cluster Kubernetes Service Accounts are bound 1-to-1 with GCP Service Accounts without static JSON credentials.
-* **GCP Secret Manager**: Sensitive M2M credentials are generated dynamically and stored encrypted in Google Secret Manager.
-* **Zero Public Exposure**: Internal Ingress and Tailscale integration ensure zero exposed external IP addresses.
+The Data Plane features an advanced Python REPL runner (`DataPlaneSandboxRunner`) tailored for LLM code execution:
+
+* **Prompt Cache Protection (`dynamic_catalog=True`)**:
+  - `CodeMode` hides unneeded tool stubs during initial prompt construction, injecting discovered tools dynamically via system instructions to preserve provider KV prompt cache.
+* **Top-Level `await` Support**:
+  - Code snippets containing top-level `await` statements (e.g. `res = await arm_tools.profile_and_optimize_kernel(...)`) are wrapped in an async harness and evaluated without syntax errors.
+* **Multi-Turn State Persistence**:
+  - Variables, imports, and state created in Turn 1 persist seamlessly into Turn 2 REPL turns.
+* **`arm_tools` Parallel SDK Bridge**:
+  - Exposes `arm_tools.my_tool(...)` inside the REPL environment, enabling concurrent tool invocation via `asyncio.gather(arm_tools.tool1(), arm_tools.tool2())`.
+
+---
+
+## 🔌 Tool Registration & Workspace Context Slicing
+
+To prevent context window bloat and reduce token costs by >85%, the platform implements **Workspace Context Slicing**:
+
+* **Header-Based Context Slicing (`X-Workspace-Context`)**:
+  - Requests containing headers like `X-Workspace-Context: physical-ai` receive only base tools + physical-AI domain tools, keeping prompt footprint **< 1,500 tokens** (down from 10,000+ tokens).
+* **On-Demand Search Meta-Tool (`mcp__search_tools`)**:
+  - Unlisted domain tools are lazy-loaded when the LLM queries the `mcp__search_tools(query, domain)` meta-tool.
+* **Dynamic Tool Registration**:
+  - Machine-to-machine agents register domain tools dynamically via `POST /api/v1/registry/register` using Keycloak M2M Bearer JWTs.
+
+---
+
+## 🌐 Federated MCP Server Integration
+
+`MCPMultiplexerService` aggregates local tools alongside 3rd-party, Arm internal, and SaaS MCP servers into a single unified endpoint:
+
+1. **Server Registration & Handshake (`POST /api/v1/registry/servers/register`)**:
+   - Performs JSON-RPC 2.0 `tools/list` handshakes with upstream MCP servers (e.g., Official Arm Hardware Telemetry, KleidiAI GEMM benchmarks, or 3rd-party SaaS servers) and registers their schemas into `config/mcp_registry.json`.
+2. **Transparent Tool Proxying (`POST /api/v1/registry/call`)**:
+   - Automatically determines tool ownership. Local tools are executed via `SandboxOrchestrator`, while upstream tools are proxied transparently via JSON-RPC 2.0 `tools/call`.
+
+---
+
+## 🧪 Testing Architecture & Strategy
+
+| Test Domain | Scope & Markers | Execution Strategy |
+| :--- | :--- | :--- |
+| **Unit & Integration** | Control plane routers, auth, & worker REPL (`-m "not kind and not heavy"`) | Fast PR Gate (`platform_ci_cd.yml`) |
+| **E2E Gateway Smoke** | Lightweight KinD cluster validation (`tests/e2e/test_smoke.py`) | Fast PR Gate (`platform_ci_cd.yml`) |
+| **Heavy E2E Benchmarks** | Multi-turn agent scenarios & performance (`-m "heavy"`) | Scheduled / Labeled (`e2e-benchmarks.yml`) |
+
+### Execution Commands
+
+```bash
+# Sync local virtual environment
+uv sync
+
+# Run fast unit & integration tests (< 5s)
+uv run pytest -m "not kind and not heavy"
+
+# Run fast gateway smoke suite on KinD
+E2E_TARGET=kind GATEWAY_BASE_URL=http://localhost:8080 uv run pytest tests/e2e/test_smoke.py -v
+
+# Run heavy multi-turn agent benchmarks
+uv run pytest tests/e2e/test_scenarios.py -v -m "heavy"
+```
+
+---
+
+## 🔮 Future Roadmap & Multi-Tenancy
+
+* **Multi-Cloud & On-Premises Arm Bare-Metal**:
+  - Extend `SandboxOrchestrator` to schedule workloads across AWS Graviton3/4, Azure Cobalt 100, and on-premises Arm Neoverse V2 bare-metal clusters.
 
 ---
 

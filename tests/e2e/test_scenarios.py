@@ -1,18 +1,17 @@
 """Extended Cluster Scenario Test Suite.
 
 Deep integration tests evaluating InitContainer integrity, node pool routing,
-gVisor security probes (read-only FS, raw sockets, namespace blocks), and Code Mode vs. Classic benchmarking.
+gVisor security probes, and Code Mode vs. Classic benchmarking.
 """
 
 import logging
 from typing import Any
 
-import httpx
 import pytest
 
 from src.control_plane.orchestrator import SandboxOrchestrator
 from src.data_plane.worker import DataPlaneSandboxRunner
-from tests.e2e.conftest import E2E_TARGET, GATEWAY_BASE_URL
+from tests.e2e.conftest import E2E_TARGET
 
 logger = logging.getLogger("mvcp.e2e.scenarios")
 
@@ -24,7 +23,7 @@ logger = logging.getLogger("mvcp.e2e.scenarios")
 @pytest.mark.heavy
 @pytest.mark.asyncio
 async def test_init_container_and_artifact_registry_integrity():
-    """Validate SandboxOrchestrator pod spec includes tools-installer initContainer and read-only /opt/arm-tools mount."""
+    """Validate pod spec tools-installer initContainer and read-only /opt/arm-tools mount."""
     orchestrator = SandboxOrchestrator()
     manifest = orchestrator.build_pod_manifest(
         task_id="scenario-integrity-001",
@@ -67,7 +66,7 @@ async def test_init_container_and_artifact_registry_integrity():
 @pytest.mark.heavy
 @pytest.mark.asyncio
 async def test_node_pool_and_sandbox_routing():
-    """Assert use_gvisor=True schedules on arm-gvisor-sandbox with runtimeClassName: gvisor, while use_gvisor=False routes to arm-native-baseline."""
+    """Assert routing for gVisor runtime and arm-native-baseline node pools."""
     orchestrator = SandboxOrchestrator()
     orchestrator.allow_native_benchmarks = True
 
@@ -92,7 +91,7 @@ async def test_node_pool_and_sandbox_routing():
 @pytest.mark.heavy
 @pytest.mark.asyncio
 async def test_gvisor_security_probes():
-    """Execute in-sandbox probes validating read-only write blocks, raw socket blocks, and namespace blocks."""
+    """Execute probes validating read-only write, raw socket, and namespace blocks."""
     runner = DataPlaneSandboxRunner(memory_limit_mb=512, timeout_seconds=10.0)
 
     probe_script = """
@@ -136,13 +135,13 @@ result = results
     assert "BLOCKED" in probe_res["unshare"]
 
 
-async def run_agent_loop(mode: str, problem: str, test_client=None) -> dict[str, Any]:
+async def run_agent_loop(mode: str, problem: str, api_client) -> dict[str, Any]:
     """Simulates a multi-turn LLM agent execution loop routing through Control Plane endpoints.
 
     Args:
         mode: Execution mode ('direct' for Classic, 'codemode' for Code Mode).
         problem: Prompt problem statement / source code.
-        test_client: Optional TestClient for in-memory HTTP requests.
+        api_client: Async client for HTTP requests (in-memory or live).
 
     Returns:
         Dict containing total 'turns', 'prompt_tokens', 'completion_tokens', and 'completed' status.
@@ -168,17 +167,10 @@ async def run_agent_loop(mode: str, problem: str, test_client=None) -> dict[str,
         if mode == "codemode":
             headers["X-Workspace-Context"] = "physical-ai"
 
-        if test_client:
-            res = test_client.post("/v1/chat/completions", json=llm_payload, headers=headers)
-            assert res.status_code == 200
-            res_data = res.json()
-            prompt_tokens = int(res.headers.get("X-LLM-Prompt-Tokens", "100"))
-        else:
-            async with httpx.AsyncClient(base_url=GATEWAY_BASE_URL, timeout=10.0) as client:
-                res = await client.post("/v1/chat/completions", json=llm_payload, headers=headers)
-                assert res.status_code == 200
-                res_data = res.json()
-                prompt_tokens = int(res.headers.get("X-LLM-Prompt-Tokens", "100"))
+        res = await api_client.post("/v1/chat/completions", json=llm_payload, headers=headers)
+        assert res.status_code == 200
+        res_data = res.json()
+        prompt_tokens = int(res.headers.get("X-LLM-Prompt-Tokens", "100"))
 
         total_prompt_tokens += prompt_tokens
         completion_tokens = res_data.get("usage", {}).get("completion_tokens", 120)
@@ -192,11 +184,7 @@ async def run_agent_loop(mode: str, problem: str, test_client=None) -> dict[str,
                 "name": "profile_and_optimize_kernel",
                 "arguments": {"source_code": problem},
             }
-            if test_client:
-                tool_res = test_client.post("/api/v1/registry/call", json=tool_call_payload)
-            else:
-                async with httpx.AsyncClient(base_url=GATEWAY_BASE_URL, timeout=10.0) as client:
-                    tool_res = await client.post("/api/v1/registry/call", json=tool_call_payload)
+            tool_res = await api_client.post("/api/v1/registry/call", json=tool_call_payload)
             assert tool_res.status_code == 200
             tool_output = tool_res.json()
 
@@ -227,16 +215,12 @@ async def run_agent_loop(mode: str, problem: str, test_client=None) -> dict[str,
 
 @pytest.mark.heavy
 @pytest.mark.asyncio
-async def test_code_mode_vs_classic_benchmarking(test_client):
+async def test_code_mode_vs_classic_benchmarking(api_client):
     """Compare Classic tool calling vs Code Mode execution via real HTTP agent loops."""
     problem = "void matmul_opt() { /* Optimize SME2 kernel */ }"
 
-    if E2E_TARGET in ["kind", "live_gke", "cluster"]:
-        classic_res = await run_agent_loop("direct", problem, test_client=None)
-        code_mode_res = await run_agent_loop("codemode", problem, test_client=None)
-    else:
-        classic_res = await run_agent_loop("direct", problem, test_client=test_client)
-        code_mode_res = await run_agent_loop("codemode", problem, test_client=test_client)
+    classic_res = await run_agent_loop("direct", problem, api_client=api_client)
+    code_mode_res = await run_agent_loop("codemode", problem, api_client=api_client)
 
     assert classic_res["completed"] is True
     assert code_mode_res["completed"] is True

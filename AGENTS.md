@@ -25,12 +25,6 @@ This document establishes mandatory coding standards, architectural patterns, an
   * Run tests: `uv run pytest`
 * **Linting & Formatting:** Run `uv run ruff check` and `uv run ruff format` to ensure strict PEP 8 and code-quality compliance.
 * **Static Type Checking:** Run `uv run ty check` for static type verification. All production functions must include explicit type annotations for parameters and return values.
-* **Strict Pydantic API Schemas (`schemas.py`):**
-  - All FastAPI request and response payloads MUST use explicit Pydantic `BaseModel` subclasses in `src/control_plane/schemas.py`.
-  - **Never** use untyped raw `dict` objects or manual `await request.json()` parsing in API handlers.
-  - Maintain a clean architectural separation:
-    - **`schemas.py`**: External API Data Transfer Objects (DTOs) and request/response contracts (`MCPJsonRPCRequest`, `MCPJsonRPCResponse`).
-    - **`types.py`**: Internal domain models, dependency injection containers (`ArmPlatformDeps`), and system type aliases.
 
 ---
 
@@ -51,37 +45,39 @@ def dispatch_tool(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
     Raises:
         ValueError: If tool_name is unknown or payload validation fails.
     """
-    ...
-```
+🛡️ 3. Production Code Integrity & Fail-Fast Principle
+Zero Inline Mocking or Fallback Logic in Production:
 
----
+Production code (src/) must fail fast and raise explicit, actionable exceptions (ValueError, RuntimeError, KeyError) when required API keys, environment variables, or secrets are missing.
 
-## 🛡️ 3. Production Code Integrity & Fail-Fast Principle
-* **Zero Inline Mocking or Fallback Logic in Production:**
-  * Production code (`src/`) must fail fast and raise explicit, actionable exceptions (`ValueError`, `RuntimeError`, `KeyError`) when required API keys, environment variables, or secrets are missing.
-  * Do NOT swallow missing secrets or dependencies by returning dummy dictionaries or silently switching to mock models in production modules.
-* **Explicit Overrides & Dependency Injection:**
-  * Design factory functions and services to accept explicit parameters or dependency injection objects (`ArmPlatformDeps`, `model_name`).
-  * Failures must occur immediately at initial setup so Kubernetes probes and monitoring tools register infrastructure issues.
+Do NOT swallow missing secrets or dependencies by returning dummy dictionaries or silently switching to mock models in production modules.
 
----
+Explicit Overrides & Dependency Injection:
 
-## 🧪 4. Testing & Mocking Standards
-* **Isolated Pytest Fixtures (`tests/conftest.py`):**
-  * All test mocking, dummy environment variables (`ANTHROPIC_API_KEY="mock-test-key"`), and test model bindings MUST live exclusively inside `tests/conftest.py` or `tests/` directory files.
-  * Production service factories must remain 100% clean of testing logic.
-* **Offline & Deterministic Unit Test Execution:**
-  * The `pytest` suite must execute completely offline in < 30 seconds without making paid external network or LLM API calls.
+Design factory functions and services to accept explicit parameters or dependency injection objects (ArmPlatformDeps, model_name).
 
----
+Failures must occur immediately at initial setup so Kubernetes probes and monitoring tools register infrastructure issues.
 
-## 🏗️ 5. Terraform & Infrastructure Standards
-* **Strict Declarative IaC Principle (No Out-of-Band `gcloud` Provisioning):**
-  * ALL cloud infrastructure (GKE clusters, node pools, IAM policy bindings, Workload Identity pools, Artifact Registry repositories, Cloud DNS, firewalls) MUST be declared exclusively in Terraform files (`terraform/`).
-  * **NEVER** create, update, or modify live GCP infrastructure using direct `gcloud` or GCP Console manual commands. All changes must originate from declarative Terraform code and be applied via `terraform apply` or Terraform automation to guarantee zero infrastructure drift.
-* **Secretless OIDC Workload Identity Federation:**
-  * Never create or commit static GCP service account JSON key files.
-  * Authenticate GitHub Actions workflows using secretless OIDC Workload Identity Pools with explicit repository bindings (`attribute.repository/OWNER/REPO`).
-* **Declarative IAM & Zero Infrastructure Drift:**
-  * Declare all IAM policy bindings explicitly in Terraform (`terraform/iam.tf`).
-  * Parametrize GCP project IDs, regions, zones, and repository identifiers in `variables.tf` and `terraform.tfvars` to prevent hardcoded configuration drift.
+🧪 4. Testing & Mocking Standards
+Isolated Pytest Fixtures (tests/conftest.py):
+
+All test mocking, dummy environment variables (ANTHROPIC_API_KEY="mock-test-key"), and test model bindings MUST live exclusively inside tests/conftest.py or tests/ directory files.
+
+Production service factories must remain 100% clean of testing logic.
+
+Offline & Deterministic Unit Test Execution:
+
+The pytest suite must execute completely offline in < 30 seconds without making paid external network or LLM API calls.
+
+🏗️ 5. Terraform & Infrastructure Standards
+Secretless OIDC Workload Identity Federation:
+
+Never create or commit static GCP service account JSON key files.
+
+Authenticate GitHub Actions workflows using secretless OIDC Workload Identity Pools with explicit repository bindings (attribute.repository/OWNER/REPO).
+
+Declarative IAM & Zero Infrastructure Drift:
+
+Declare all IAM policy bindings explicitly in Terraform (terraform/iam.tf).
+
+Parametrize GCP project IDs, regions, zones, and repository identifiers in variables.tf and terraform.tfvars to prevent hardcoded configuration drift.

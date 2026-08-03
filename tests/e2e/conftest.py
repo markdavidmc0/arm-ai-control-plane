@@ -1,57 +1,33 @@
-"""E2E Session Fixtures & Port-Forwarding Configuration."""
+"""E2E Test Fixtures for Two-Tier Testing Strategy.
 
-import logging
+Provides a unified async api_client fixture that executes in-memory via
+httpx.ASGITransport for fast PR gate smoke tests, or over TCP HTTP to a live cluster.
+"""
+
 import os
-import socket
-import subprocess
-import time
 
-import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 
-logger = logging.getLogger("mvcp.e2e.conftest")
+from src.control_plane.main import app
 
+GATEWAY_BASE_URL = os.getenv("GATEWAY_BASE_URL", "in-memory")
 E2E_TARGET = os.getenv("E2E_TARGET", "inmemory").lower()
-GATEWAY_BASE_URL = os.getenv("MVCP_GATEWAY_URL", "http://localhost:8000")
 
 
-def is_port_open(host: str, port: int) -> bool:
-    """Checks if a TCP port is open and listening."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.settimeout(1.0)
-        return sock.connect_ex((host, port)) == 0
+@pytest_asyncio.fixture
+async def api_client():
+    """Provides an HTTP client for testing.
 
-
-@pytest.fixture(scope="session", autouse=True)
-def auto_port_forward_if_cluster_target():
-    """Session fixture managing background kubectl port-forwarding when targeting live clusters."""
-    port_forward_process = None
-
-    if E2E_TARGET in ["kind", "live_gke", "cluster"]:
-        if not is_port_open("localhost", 8000):
-            logger.info(
-                f"Target is '{E2E_TARGET}'. Port 8000 inactive. Launching kubectl port-forward..."
-            )
-            try:
-                port_forward_process = subprocess.Popen(
-                    [
-                        "kubectl",
-                        "port-forward",
-                        "svc/mvcp-gateway-service",
-                        "8000:8000",
-                    ],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                )
-                for _ in range(10):
-                    if is_port_open("localhost", 8000):
-                        break
-                    time.sleep(0.5)
-            except Exception as e:
-                logger.warning(f"Could not start kubectl port-forward: {e}")
-
-    yield GATEWAY_BASE_URL
-
-    if port_forward_process:
-        logger.info("Terminating background kubectl port-forward process...")
-        port_forward_process.terminate()
-        port_forward_process.wait()
+    Defaults to In-Memory ASGI execution for fast, deterministic smoke tests.
+    If GATEWAY_BASE_URL points to an external HTTP URL (e.g. http://localhost:8080),
+    connects over TCP to the running live cluster service.
+    """
+    if GATEWAY_BASE_URL == "in-memory" or not GATEWAY_BASE_URL.startswith("http"):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            yield client
+    else:
+        async with AsyncClient(base_url=GATEWAY_BASE_URL, timeout=30.0) as client:
+            yield client
