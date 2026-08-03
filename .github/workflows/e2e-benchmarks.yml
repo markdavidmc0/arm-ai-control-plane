@@ -49,3 +49,19 @@ jobs:
         run: |
           uv sync
           uv run pytest tests/e2e/test_scenarios.py -v -m "heavy"
+
+      - name: Stream Pod Logs & Describe Cluster Status on Failure
+        if: failure()
+        run: |
+          echo "=== 1. ALL POD STATUSES ==="
+          kubectl get pods -A -o wide
+
+          echo "=== 2. DESCRIBE FAILED/PENDING PODS ==="
+          kubectl describe pods -n default
+
+          echo "=== 3. GATEWAY CONTAINER LOGS ==="
+          kubectl logs -n default -l app=mvcp-gateway --all-containers=true --tail=200 || true
+
+          echo "=== 4. ENVOY EDGE GUARD LOGS ==="
+          kubectl logs -n default -l app=envoy-edge-guard --all-containers=true --tail=200 || true
+
