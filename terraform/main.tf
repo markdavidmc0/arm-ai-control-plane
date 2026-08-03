@@ -227,3 +227,11 @@ resource "google_dns_managed_zone" "arm_internal" {
     }
   }
 }
+
+# --- GCP Artifact Registry for MCP Tools Container Images ---
+resource "google_artifact_registry_repository" "mcp_tools" {
+  location      = var.region
+  repository_id = "mcp-tools"
+  description   = "GCP Artifact Registry Docker repository for Arm Workspace Multi-Language Tools OCI images"
+  format        = "DOCKER"
+}

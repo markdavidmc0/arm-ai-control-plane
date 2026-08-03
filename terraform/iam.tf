@@ -69,6 +69,28 @@ resource "google_project_iam_member" "github_ci_gke_developer" {
   member  = "serviceAccount:${google_service_account.github_ci.email}"
 }
 
+# --- 2. Workload Identity Pool & Provider for GitHub Actions OIDC ---
+resource "google_iam_workload_identity_pool" "github_actions_pool" {
+  workload_identity_pool_id = "github-actions-pool"
+  display_name              = "GitHub Actions Pool"
+  description               = "OIDC identity pool for GitHub Actions CI/CD workflows"
+  disabled                  = false
+}
+
+resource "google_iam_workload_identity_pool_provider" "github_actions_provider" {
+  workload_identity_pool_id          = google_iam_workload_identity_pool.github_actions_pool.workload_identity_pool_id
+  workload_identity_pool_provider_id = "github-actions-provider"
+  display_name                       = "GitHub Actions Provider"
+  attribute_condition                = "attribute.repository in ['markdavidmc0/arm-ai-control-plane', 'markdavidmc0/arm-developer-workspace']"
+  attribute_mapping = {
+    "google.subject"       = "assertion.sub"
+    "attribute.repository" = "assertion.repository"
+  }
+  oidc {
+    issuer_uri = "https://token.actions.githubusercontent.com"
+  }
+}
+
 # Bind GitHub Actions OIDC Workload Identity Pool to mvcp-github-ci-sa for Control Plane repo
 resource "google_service_account_iam_member" "github_ci_workload_identity" {
   service_account_id = google_service_account.github_ci.name

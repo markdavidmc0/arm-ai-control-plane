@@ -70,6 +70,9 @@ def dispatch_tool(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
 ---
 
 ## 🏗️ 5. Terraform & Infrastructure Standards
+* **Strict Declarative IaC Principle (No Out-of-Band `gcloud` Provisioning):**
+  * ALL cloud infrastructure (GKE clusters, node pools, IAM policy bindings, Workload Identity pools, Artifact Registry repositories, Cloud DNS, firewalls) MUST be declared exclusively in Terraform files (`terraform/`).
+  * **NEVER** create, update, or modify live GCP infrastructure using direct `gcloud` or GCP Console manual commands. All changes must originate from declarative Terraform code and be applied via `terraform apply` or Terraform automation to guarantee zero infrastructure drift.
 * **Secretless OIDC Workload Identity Federation:**
   * Never create or commit static GCP service account JSON key files.
   * Authenticate GitHub Actions workflows using secretless OIDC Workload Identity Pools with explicit repository bindings (`attribute.repository/OWNER/REPO`).
