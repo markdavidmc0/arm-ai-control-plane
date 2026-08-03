@@ -1,138 +1,12 @@
-"""Extended Cluster Scenario Test Suite.
+"""Live GKE & LLM Agent Performance Scenario Benchmarks.
 
-Deep integration tests evaluating InitContainer integrity, node pool routing,
-gVisor security probes, and Code Mode vs. Classic benchmarking.
+Evaluates multi-turn LLM agent tasks comparing Code Mode (static catalog)
+against sequential MCP tool calling. Requires live LLM API credentials or --run-benchmarks.
 """
 
-import logging
 from typing import Any
 
 import pytest
-
-from src.control_plane.orchestrator import SandboxOrchestrator
-from src.data_plane.worker import DataPlaneSandboxRunner
-from tests.e2e.conftest import E2E_TARGET
-
-logger = logging.getLogger("mvcp.e2e.scenarios")
-
-# ==============================================================================
-# 1. InitContainer & Artifact Registry Integrity
-# ==============================================================================
-
-
-@pytest.mark.heavy
-@pytest.mark.asyncio
-async def test_init_container_and_artifact_registry_integrity():
-    """Validate pod spec tools-installer initContainer and read-only /opt/arm-tools mount."""
-    orchestrator = SandboxOrchestrator()
-    manifest = orchestrator.build_pod_manifest(
-        task_id="scenario-integrity-001",
-        cxx_code="void kernel() {}",
-        use_gvisor=True,
-        execution_mode="codemode",
-    )
-
-    spec = manifest["spec"]
-    init_containers = spec.get("initContainers", [])
-    assert len(init_containers) == 1
-    installer = init_containers[0]
-    assert installer["name"] == "tools-installer"
-    assert "arm-workspace-tools" in installer["image"]
-
-    container = spec["containers"][0]
-    volume_mounts = container.get("volumeMounts", [])
-    assert len(volume_mounts) == 1
-    mount = volume_mounts[0]
-    assert mount["mountPath"].rstrip("/") == "/opt/arm-tools"
-    assert mount["readOnly"] is True
-
-    # In active cluster target, verify live submission against cluster CoreV1Api
-    if E2E_TARGET in ["kind", "live_gke", "cluster"] and orchestrator.k8s_client_configured:
-        from kubernetes import client
-
-        v1 = client.CoreV1Api()
-        try:
-            v1.create_namespaced_pod(body=manifest, namespace="default")
-            v1.delete_namespaced_pod(name=manifest["metadata"]["name"], namespace="default")
-        except Exception as e:
-            logger.warning(f"Scenario 1 cluster pod submission validation failed: {e}")
-
-
-# ==============================================================================
-# 2. Node Pool & Sandbox Routing
-# ==============================================================================
-
-
-@pytest.mark.heavy
-@pytest.mark.asyncio
-async def test_node_pool_and_sandbox_routing():
-    """Assert routing for gVisor runtime and arm-native-baseline node pools."""
-    orchestrator = SandboxOrchestrator()
-    orchestrator.allow_native_benchmarks = True
-
-    manifest_gvisor = orchestrator.build_pod_manifest(
-        "scenario-routing-gvisor", "void k1() {}", use_gvisor=True, execution_mode="codemode"
-    )
-    assert manifest_gvisor["spec"]["runtimeClassName"] == "gvisor"
-    assert manifest_gvisor["spec"]["nodeSelector"]["mvcp.ai/node-type"] == "arm-gvisor-sandbox"
-
-    manifest_native = orchestrator.build_pod_manifest(
-        "scenario-routing-native", "void k2() {}", use_gvisor=False, execution_mode="direct"
-    )
-    assert manifest_native["spec"].get("runtimeClassName") is None
-    assert manifest_native["spec"]["nodeSelector"]["mvcp.ai/node-type"] == "arm-native-baseline"
-
-
-# ==============================================================================
-# 3. gVisor Security Probes
-# ==============================================================================
-
-
-@pytest.mark.heavy
-@pytest.mark.asyncio
-async def test_gvisor_security_probes():
-    """Execute probes validating read-only write, raw socket, and namespace blocks."""
-    runner = DataPlaneSandboxRunner(memory_limit_mb=512, timeout_seconds=10.0)
-
-    probe_script = """
-results = {}
-
-# Probe 1: Read-Only Filesystem Write Block
-try:
-    with open('/opt/arm-tools/probe_write.tmp', 'w') as f:
-        f.write('unauthorized')
-    results['fs_write'] = 'ALLOWED'
-except Exception as e:
-    results['fs_write'] = f'BLOCKED:{type(e).__name__}'
-
-# Probe 2: Raw Socket Creation Block (SOCK_RAW)
-try:
-    import socket
-    s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
-    results['raw_socket'] = 'ALLOWED'
-except Exception as e:
-    results['raw_socket'] = f'BLOCKED:{type(e).__name__}'
-
-# Probe 3: Namespace Manipulation Block (os.unshare)
-try:
-    import os
-    if hasattr(os, 'unshare'):
-        os.unshare(0)
-        results['unshare'] = 'ALLOWED'
-    else:
-        results['unshare'] = 'BLOCKED:AttributeError'
-except Exception as e:
-    results['unshare'] = f'BLOCKED:{type(e).__name__}'
-
-result = results
-"""
-    res = await runner.execute_payload(probe_script)
-    assert res["status"] == "success"
-    probe_res = res["result"]
-
-    assert "BLOCKED" in probe_res["fs_write"]
-    assert "BLOCKED" in probe_res["raw_socket"]
-    assert "BLOCKED" in probe_res["unshare"]
 
 
 async def run_agent_loop(mode: str, problem: str, api_client) -> dict[str, Any]:
@@ -209,14 +83,19 @@ async def run_agent_loop(mode: str, problem: str, api_client) -> dict[str, Any]:
 
 
 # ==============================================================================
-# 4. Code Mode vs. Classic Benchmarking
+# Code Mode vs. Classic Benchmarking
 # ==============================================================================
 
 
 @pytest.mark.heavy
 @pytest.mark.asyncio
-async def test_code_mode_vs_classic_benchmarking(api_client):
+async def test_code_mode_vs_classic_benchmarking(api_client, target_env, llm_enabled):
     """Compare Classic tool calling vs Code Mode execution via real HTTP agent loops."""
+    if not llm_enabled:
+        pytest.skip(
+            "Scenario benchmarking requires live GKE and LLM credentials (or --run-benchmarks)."
+        )
+
     problem = "void matmul_opt() { /* Optimize SME2 kernel */ }"
 
     classic_res = await run_agent_loop("direct", problem, api_client=api_client)

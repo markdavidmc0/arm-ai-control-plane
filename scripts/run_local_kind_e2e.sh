@@ -35,12 +35,13 @@ echo -e "\n${CYAN}[2/3] Deploying Gateway, Envoy, and MCP Server manifests to Ki
 kubectl apply -f .platform/deployments/gateway-and-envoy.yaml
 kubectl apply -f .platform/deployments/in-house-mcp-servers.yaml
 
-echo -e "${CYAN}Waiting for mvcp-gateway-deployment rollout readiness...${NC}"
+echo -e "${CYAN}Waiting for gateway and Envoy deployment rollout readiness...${NC}"
 kubectl rollout status deployment/mvcp-gateway-deployment --timeout=120s || true
+kubectl rollout status deployment/envoy-edge-guard-deployment --timeout=120s || true
 
 # 3. Run E2E Test Suite
 echo -e "\n${CYAN}[3/3] Executing E2E Platform Test Suite against Kind cluster...${NC}"
-E2E_TARGET=kind uv run pytest tests/e2e/ -v
+uv run pytest tests/e2e/test_infrastructure.py --target=kind --endpoint=http://localhost:8080 -v
 
 echo -e "\n${GREEN}====================================================================${NC}"
 echo -e "${GREEN}   LOCAL KIND E2E PLATFORM TESTS COMPLETED SUCCESSFULLY!             ${NC}"

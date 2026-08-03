@@ -1,82 +1,119 @@
-"""Zero-Dependency Async LLM Proxy Router Service.
+"""Async Cloud-Agnostic LLM Proxy Router Service using LiteLLM.
 
-Forwards `/v1/chat/completions` requests to multi-provider backends (Anthropic, OpenAI, local Arm models)
-using lightweight async `httpx`. Computes and injects operational headers into every client response:
+Forwards `/v1/chat/completions` requests to multi-provider backends (Anthropic, OpenAI, Gemini)
+using `litellm.acompletion`. Computes costs via `completion_cost` and injects telemetry headers:
 - `X-LLM-Cost-USD`
 - `X-LLM-Prompt-Tokens`
 - `X-LLM-Latency-MS`
+- `X-LLM-Provider`
 """
 
 import logging
+import os
 import time
 from typing import Any
 
-import httpx
+import litellm
+
+from src.control_plane.services.auth_service import AuthService
 
 logger = logging.getLogger("mvcp.llm_router")
 
 
 class LLMRouterService:
-    """Async proxy router for LLM chat completions with cost/token header injection."""
+    """Async cloud-agnostic proxy router for LLM completions with cost header injection."""
 
-    def __init__(self):
-        self.client = httpx.AsyncClient(timeout=30.0)
+    def __init__(self, auth_service: AuthService | None = None):
+        self.auth_service = auth_service or AuthService()
 
     async def route_completion(
         self, request_data: dict[str, Any]
     ) -> tuple[dict[str, Any], dict[str, str]]:
-        """Routes completion payload and computes cost/token metadata headers.
+        """Routes completion payload via litellm.acompletion and computes metadata headers.
 
         Args:
             request_data: OpenAI-compatible `/v1/chat/completions` request body.
 
         Returns:
             Tuple of (response_payload_dict, headers_to_inject_dict).
+
+        Raises:
+            Exception: If litellm.acompletion fails.
         """
         start_time = time.time()
         model = request_data.get("model", "claude-3-5-sonnet")
         messages = request_data.get("messages", [])
 
-        # Estimate prompt tokens (~4 chars per token)
-        prompt_str = "".join(
-            [m.get("content", "") for m in messages if isinstance(m.get("content"), str)]
-        )
-        prompt_tokens = max(1, len(prompt_str) // 4)
-        completion_tokens = 120
-
-        # Simulate or proxy to real provider
-        latency_ms = round((time.time() - start_time) * 1000.0 + 45.2, 2)
-
-        # Estimate cost (Sonnet baseline: $3.00/1M prompt, $15.00/1M completion)
-        cost_usd = round((prompt_tokens * 0.000003) + (completion_tokens * 0.000015), 6)
-
-        response_payload = {
-            "id": f"chatcmpl-mvcp-{int(time.time())}",
-            "object": "chat.completion",
-            "created": int(time.time()),
+        # Build litellm.acompletion keyword arguments
+        completion_kwargs: dict[str, Any] = {
             "model": model,
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": f"MVCP LLM Proxy response processed for model [{model}] on Arm Tau T2A.",
-                    },
-                    "finish_reason": "stop",
-                }
-            ],
-            "usage": {
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": prompt_tokens + completion_tokens,
-            },
+            "messages": messages,
         }
+
+        # Dynamic GCP configuration
+        gcp_project = os.environ.get("GCP_PROJECT_ID", "sovereign-ai-495715")
+        gcp_location = os.environ.get("GCP_LOCATION", "us-central1")
+
+        # Inject GCP STS credentials for Vertex AI / Gemini routing
+        if model.startswith("vertex_ai") or "gemini" in model.lower():
+            sts_token = await self.auth_service.get_gcp_sts_token()
+            completion_kwargs["custom_llm_provider"] = "vertex_ai"
+            completion_kwargs["vertex_credentials"] = sts_token
+            completion_kwargs["project"] = gcp_project
+            completion_kwargs["location"] = gcp_location
+
+        # Optional parameters to forward if present
+        for param in ["temperature", "top_p", "max_tokens", "tools", "stream"]:
+            if param in request_data and request_data[param] is not None:
+                completion_kwargs[param] = request_data[param]
+
+        try:
+            response = await litellm.acompletion(**completion_kwargs)
+        except Exception as e:
+            logger.error(f"[LLMRouterService] litellm.acompletion failed for model {model}: {e}")
+            raise
+
+        latency_ms = round((time.time() - start_time) * 1000.0, 2)
+
+        # Convert ModelResponse or dict to standard dictionary
+        if hasattr(response, "model_dump"):
+            response_payload = response.model_dump()
+        elif hasattr(response, "dict"):
+            response_payload = response.dict()
+        elif isinstance(response, dict):
+            response_payload = response
+        else:
+            response_payload = dict(response)
+
+        # Calculate cost via litellm.completion_cost
+        try:
+            cost = litellm.completion_cost(completion_response=response)
+            cost_usd = f"{cost:.6f}" if cost is not None else "0.000000"
+        except (ValueError, KeyError, AttributeError, TypeError) as price_err:
+            logger.info(
+                f"[LLMRouterService] Pricing for model [{model}] unavailable in LiteLLM catalog "
+                f"({price_err}). Setting X-LLM-Cost-USD header to 0.000000."
+            )
+            cost_usd = "0.000000"
+        except Exception as unhandled_cost_err:
+            logger.exception(
+                f"[LLMRouterService] Unexpected error during completion cost calculation for "
+                f"model [{model}]: {unhandled_cost_err}"
+            )
+            cost_usd = "0.000000"
+
+        # Token usage extraction
+        usage = response_payload.get("usage", {}) or {}
+        prompt_tokens = usage.get("prompt_tokens", 0)
+
+        # Model / Provider identification
+        provider_name = response_payload.get("model", model) or "arm-mvcp-gateway"
 
         headers = {
             "X-LLM-Cost-USD": str(cost_usd),
             "X-LLM-Prompt-Tokens": str(prompt_tokens),
             "X-LLM-Latency-MS": str(latency_ms),
-            "X-LLM-Provider": "arm-mvcp-gateway",
+            "X-LLM-Provider": str(provider_name),
         }
 
         return response_payload, headers

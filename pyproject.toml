@@ -13,6 +13,7 @@ dependencies = [
     "logfire[system-metrics]>=4.39.0",
     "pydantic-ai>=0.0.20",
     "pydantic-ai-harness[codemode]>=0.1.0",
+    "litellm<1.80.0",
 ]
 
 [dependency-groups]

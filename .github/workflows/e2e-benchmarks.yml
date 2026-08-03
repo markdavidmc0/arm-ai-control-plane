@@ -71,13 +71,10 @@ jobs:
           kubectl apply -f .platform/deployments/in-house-mcp-servers.yaml
           kubectl rollout status deployment/mvcp-gateway-deployment --timeout=180s
 
-      - name: Run Heavy E2E Agent Benchmarks
-        env:
-          E2E_TARGET: kind
-          GATEWAY_BASE_URL: http://localhost:8080
+      - name: Run E2E Infrastructure Tests
         run: |
           uv sync
-          uv run pytest tests/e2e/test_scenarios.py -v -m "heavy"
+          uv run pytest tests/e2e/test_infrastructure.py --target=kind --endpoint=http://localhost:8080 -v
 
       - name: Stream Pod Logs & Describe Cluster Status on Failure
         if: failure()

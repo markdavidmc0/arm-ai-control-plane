@@ -122,3 +122,10 @@ resource "google_service_account_iam_member" "mvcp_gateway_workload_identity" {
     google_container_cluster.primary
   ]
 }
+
+# IAM Role: Vertex AI User for LiteLLM completion calls
+resource "google_project_iam_member" "mvcp_gateway_aiplatform" {
+  project = var.project_id
+  role    = "roles/aiplatform.user"
+  member  = "serviceAccount:${google_service_account.mvcp_gateway.email}"
+}
