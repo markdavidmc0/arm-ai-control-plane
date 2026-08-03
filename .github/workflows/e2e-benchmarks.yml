@@ -30,14 +30,39 @@ jobs:
           curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
+      - name: Authenticate to Google Cloud via Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/389363417412/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider'
+          service_account: 'mvcp-github-ci-sa@sovereign-ai-495715.iam.gserviceaccount.com'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry & Prepare Images
+        run: |
+          gcloud auth configure-docker gcr.io --quiet
+          docker build -t gcr.io/sovereign-ai-495715/mvcp-gateway:latest .
+          docker pull gcr.io/sovereign-ai-495715/official-arm-mcp:v1.0.0 || true
+          docker pull gcr.io/sovereign-ai-495715/performix-mcp:v1.0.0 || true
+          docker pull gcr.io/sovereign-ai-495715/arm-metis-mcp:v1.0.0 || true
+
       - name: Create multi-node-pool kind Kubernetes Cluster
         uses: helm/kind-action@v1.10.0
         with:
           cluster_name: kind-e2e-cluster
           config: .platform/deployments/kind-config.yaml
 
+      - name: Load Pre-Pulled Images into KinD Cluster
+        run: |
+          kind load docker-image gcr.io/sovereign-ai-495715/mvcp-gateway:latest --name kind-e2e-cluster
+          kind load docker-image gcr.io/sovereign-ai-495715/official-arm-mcp:v1.0.0 --name kind-e2e-cluster || true
+          kind load docker-image gcr.io/sovereign-ai-495715/performix-mcp:v1.0.0 --name kind-e2e-cluster || true
+          kind load docker-image gcr.io/sovereign-ai-495715/arm-metis-mcp:v1.0.0 --name kind-e2e-cluster || true
+
       - name: Apply Platform Kubernetes & Envoy Manifests
         run: |
+          kubectl wait --for=condition=Ready nodes --all --timeout=60s
           kubectl apply -f .platform/deployments/gateway-and-envoy.yaml
           kubectl apply -f .platform/deployments/in-house-mcp-servers.yaml
           kubectl rollout status deployment/mvcp-gateway-deployment --timeout=180s

@@ -3,6 +3,7 @@ name: Platform Control Plane CI/CD Pipeline
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*.*.*' ]
   pull_request:
     branches: [ main ]
 
@@ -35,7 +36,7 @@ jobs:
   build-and-deploy:
     name: Build Container Images & Trigger Kubernetes Rolling Update
     needs: [test-and-validate]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
     runs-on: ubuntu-latest
 
     permissions:
@@ -73,7 +74,7 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: |
-            gcr.io/sovereign-ai-495715/mvcp-gateway:${{ github.sha }}
+            gcr.io/sovereign-ai-495715/mvcp-gateway:${{ github.ref_name }}
             gcr.io/sovereign-ai-495715/mvcp-gateway:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -92,5 +93,5 @@ jobs:
           kubectl apply -f .platform/deployments/gateway-and-envoy.yaml
           kubectl apply -f .platform/deployments/in-house-mcp-servers.yaml
           kubectl apply -f .platform/deployments/ingress.yaml
-          kubectl set image deployment/mvcp-gateway-deployment control-plane-gateway=gcr.io/sovereign-ai-495715/mvcp-gateway:${{ github.sha }}
+          kubectl set image deployment/mvcp-gateway-deployment control-plane-gateway=gcr.io/sovereign-ai-495715/mvcp-gateway:${{ github.ref_name }}
           kubectl rollout status deployment/mvcp-gateway-deployment --timeout=300s
