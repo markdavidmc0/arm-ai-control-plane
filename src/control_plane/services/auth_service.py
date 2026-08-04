@@ -10,12 +10,17 @@ import json
 import logging
 import os
 import time
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger("mvcp.auth_service")
 
-# Default config path
-KEYS_FILE = os.path.join(os.path.dirname(__file__), "../../../config/keys.json")
+# Absolute path resolution relative to src/control_plane/services/auth_service.py
+SERVICES_DIR = Path(__file__).resolve().parent
+CONTROL_PLANE_DIR = SERVICES_DIR.parent
+
+DEFAULT_KEYS_PATH = CONTROL_PLANE_DIR / "data" / "keys.json"
+KEYS_FILE = Path(os.getenv("KEYS_FILE_PATH", DEFAULT_KEYS_PATH)).resolve()
 
 
 def hash_key(key: str, salt: str = "mvcp_salt_2026") -> str:
@@ -128,18 +133,28 @@ class AuthService:
         # Attempt JWT verification if string is structured as a JWT token (2 periods)
         jwt_payload = self.verify_jwt_token(clean_key)
         if jwt_payload:
+            raw_scope = jwt_payload.get("scope", "")
+            scopes = (
+                raw_scope.split()
+                if isinstance(raw_scope, str) and raw_scope
+                else ["compiler", "sandbox", "tools:register", "tools:read"]
+            )
             return {
                 "key_id": jwt_payload.get("sub", "keycloak_m2m_runner"),
-                "name": "Keycloak M2M Runner",
+                "name": (
+                    jwt_payload.get("azp")
+                    or jwt_payload.get("client_id")
+                    or "Keycloak M2M Runner"
+                ),
                 "role": "m2m",
-                "scopes": ["compiler", "sandbox", "tools:register", "tools:read"],
+                "scopes": scopes,
                 "status": "active",
             }
 
         return None
 
     def verify_jwt_token(self, token: str) -> dict[str, Any] | None:
-        """Verifies a Keycloak OAuth2 JWT access token signature, expiration, and issuer.
+        """Verifies Keycloak OAuth2 or GitHub OIDC JWT access token signature and claims.
 
         Args:
             token: JWT token string.
@@ -162,7 +177,7 @@ class AuthService:
             # 1. Verify Expiration
             exp = payload.get("exp")
             if exp and time.time() > exp:
-                logger.warning(f"JWT token expired at {exp}")
+                logger.info(f"Auth denied: JWT token expired at {exp}")
                 return None
 
             # 2. Verify Issuer / OIDC Workload Identity Claims
@@ -177,7 +192,9 @@ class AuthService:
             is_keycloak_jwt = "arm-platform" in iss or "keycloak" in iss
 
             if not is_github_oidc and not is_keycloak_jwt:
-                logger.warning(f"Invalid JWT issuer or repository claims: {iss} | repo: {repo}")
+                logger.info(
+                    f"Auth denied: Invalid JWT issuer or repo: iss='{iss}', repo='{repo}'"
+                )
                 return None
 
             if is_github_oidc:
@@ -195,8 +212,11 @@ class AuthService:
             )
 
             if not has_valid_role:
-                logger.warning(f"JWT token missing required mcp-registrar role/scope: {payload}")
+                logger.info(
+                    f"Auth denied: JWT missing mcp-registrar role/scope: client_id='{client_id}'"
+                )
                 return None
+
 
             return payload
         except Exception as e:

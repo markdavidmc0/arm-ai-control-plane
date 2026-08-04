@@ -1,9 +1,9 @@
 """Control Plane API Request and Response Pydantic Schemas & Type Definitions."""
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 @dataclass
@@ -21,11 +21,23 @@ class ArmPlatformDeps:
     orchestrator: Any = None
 
 
+class JSONRPCError(BaseModel):
+    """Standard JSON-RPC 2.0 Error object schema."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    code: int = Field(..., description="JSON-RPC error code (e.g., -32601 Method Not Found)")
+    message: str = Field(..., description="Short description of the error")
+    data: Any | None = Field(None, description="Optional detailed error context or trace")
+
+
 class MCPJsonRPCRequest(BaseModel):
     """Pydantic schema for incoming MCP JSON-RPC 2.0 requests."""
 
-    jsonrpc: str = Field("2.0", description="JSON-RPC protocol version")
-    id: str | int | None = Field(None, description="Optional request ID")
+    model_config = ConfigDict(extra="ignore")
+
+    jsonrpc: Literal["2.0"] = Field("2.0", description="JSON-RPC protocol version")
+    id: str | int | None = Field(None, description="Optional request ID (None for notifications)")
     method: str = Field(
         ..., description="Target MCP method name (e.g., 'tools/call', 'tools/list')"
     )
@@ -35,10 +47,12 @@ class MCPJsonRPCRequest(BaseModel):
 class MCPJsonRPCResponse(BaseModel):
     """Pydantic schema for outgoing MCP JSON-RPC 2.0 responses."""
 
-    jsonrpc: str = Field("2.0", description="JSON-RPC protocol version")
-    id: str | int | None = Field(None, description="Corresponding request ID")
+    model_config = ConfigDict(extra="ignore")
+
+    jsonrpc: Literal["2.0"] = Field("2.0", description="JSON-RPC protocol version")
+    id: str | int | None = Field(..., description="Corresponding request ID")
     result: Any | None = Field(None, description="Successful result payload")
-    error: dict[str, Any] | None = Field(None, description="JSON-RPC error payload")
+    error: JSONRPCError | None = Field(None, description="Structured JSON-RPC error payload")
 
 
 class ToolExecutionRequest(BaseModel):
@@ -48,6 +62,30 @@ class ToolExecutionRequest(BaseModel):
     payload: dict[str, Any] = Field(
         default_factory=dict, description="Keyword arguments for tool execution"
     )
+
+
+class SandboxExecutionRequest(BaseModel):
+    """Pydantic schema for sandboxed Python code execution requests."""
+
+    script: str = Field(..., description="Python script payload to execute in gVisor sandbox")
+    timeout_seconds: int = Field(10, ge=1, le=120, description="Execution timeout limit")
+
+
+class SandboxExecutionResponse(BaseModel):
+    """Pydantic schema for sandboxed execution output."""
+
+    status: str = Field(..., description="Execution status slug ('SUCCESS', 'ERROR', 'TIMEOUT')")
+    exit_code: int = Field(..., description="Process exit code (0 for success)")
+    output: str | None = Field(None, description="Captured stdout/stderr stream output")
+    error: str | None = Field(None, description="Sandbox failure detail if applicable")
+
+
+class ToolRegistryResponse(BaseModel):
+    """Pydantic schema for registered tool listing responses."""
+
+    tools: list[dict[str, Any]] = Field(..., description="List of registered tool metadata objects")
+    tool_count: int = Field(..., description="Total count of active registered tools")
+    workspace: str = Field(..., description="Active workspace context slug")
 
 
 class HealthStatusResponse(BaseModel):
@@ -79,8 +117,8 @@ class ProgressNotificationParams(BaseModel):
 
 
 class ProgressNotificationFrame(BaseModel):
-    """Pydantic schema for streaming progress notifications."""
+    """Pydantic schema for streaming progress notifications (no ID per spec)."""
 
-    jsonrpc: str = Field("2.0", description="JSON-RPC protocol version")
+    jsonrpc: Literal["2.0"] = Field("2.0", description="JSON-RPC protocol version")
     method: str = Field("notifications/progress", description="Notification method slug")
     params: ProgressNotificationParams = Field(..., description="Notification parameter object")

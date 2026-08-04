@@ -12,66 +12,54 @@ import os
 import secrets
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
-# Allow dynamic path configuration via environment variable (useful for GKE mounts)
-DEFAULT_KEYS_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "../../config/keys.json")
-)
-KEYS_FILE = os.getenv("KEYS_FILE_PATH", DEFAULT_KEYS_PATH)
+# Absolute path resolution anchored to repo rootpython scripts/manage_keys.py create --name "curl-test" --role dev
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent.parent
+CONTROL_PLANE_DIR = REPO_ROOT / "src" / "control_plane"
+
+DEFAULT_KEYS_PATH = CONTROL_PLANE_DIR / "data" / "keys.json"
+TEMPLATE_KEYS_PATH = CONTROL_PLANE_DIR / "config" / "keys.json.example"
+
+# Global module path state target
+KEYS_FILE: Path = Path(os.getenv("KEYS_FILE_PATH", DEFAULT_KEYS_PATH)).resolve()
 
 
 def hash_key(key: str, salt: str) -> str:
-    """Computes SHA-256 digest of plain-text API key using a unique per-key salt.
-
-    Args:
-        key: Plain text key string.
-        salt: Random hexadecimal salt string.
-
-    Returns:
-        64-character hexadecimal SHA-256 string.
-    """
+    """Computes SHA-256 digest of plain-text API key using a unique per-key salt."""
     return hashlib.sha256((key + salt).encode("utf-8")).hexdigest()
 
 
 def load_keys() -> list[dict]:
     """Loads keys database from the configured json file.
-
-    Returns:
-        List of key record dictionaries.
+    
+    Aborts execution on JSON parse error to prevent accidental file clobbering.
     """
-    if os.path.exists(KEYS_FILE):
+    if KEYS_FILE.exists():
         try:
             with open(KEYS_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 return data.get("keys", [])
+        except json.JSONDecodeError as e:
+            print(f"❌ ERROR: File at {KEYS_FILE} contains invalid JSON: {e}", file=sys.stderr)
+            print("Aborting to prevent data loss. Fix or remove the file.", file=sys.stderr)
+            sys.exit(1)
         except Exception as e:
-            print(f"Error loading keys file {KEYS_FILE}: {e}", file=sys.stderr)
-            return []
+            print(f"❌ ERROR reading keys file {KEYS_FILE}: {e}", file=sys.stderr)
+            sys.exit(1)
     return []
 
 
 def save_keys(keys: list[dict]) -> None:
-    """Saves keys database to the configured json file.
-
-    Args:
-        keys: List of key record dictionaries to persist.
-    """
-    target_dir = os.path.dirname(KEYS_FILE)
-    if target_dir:
-        os.makedirs(target_dir, exist_ok=True)
-
+    """Saves keys database to the configured json file."""
+    KEYS_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(KEYS_FILE, "w", encoding="utf-8") as f:
         json.dump({"keys": keys}, f, indent=2)
 
 
 def create_key(name: str, role: str, scopes: list[str]) -> None:
-    """Generates a new plain-text API key and saves its uniquely salted SHA-256 hash.
-
-    Args:
-        name: Friendly descriptive name for the API key.
-        role: Target role string ('judge', 'dev', 'm2m').
-        scopes: List of allowed feature scope strings.
-    """
+    """Generates a new plain-text API key and saves its uniquely salted SHA-256 hash."""
     keys = load_keys()
 
     prefix_map = {
@@ -85,7 +73,6 @@ def create_key(name: str, role: str, scopes: list[str]) -> None:
     plain_key = f"{prefix}{raw_token}"
     key_id = f"key_{role}_{secrets.token_hex(4)}"
 
-    # Generate unique per-key salt to prevent dictionary attacks
     salt = secrets.token_hex(16)
     digest = hash_key(plain_key, salt)
 
@@ -136,11 +123,7 @@ def list_keys() -> None:
 
 
 def revoke_key(key_id: str) -> None:
-    """Revokes an active API key by ID.
-
-    Args:
-        key_id: Unique key identifier string.
-    """
+    """Revokes an active API key by ID."""
     keys = load_keys()
     found = False
     for k in keys:
@@ -154,12 +137,20 @@ def revoke_key(key_id: str) -> None:
         save_keys(keys)
         print(f"✅ Key [{key_id}] has been REVOKED.")
     else:
-        print(f"❌ Key ID [{key_id}] not found.", file=sys.stderr)
+        print(f"❌ Key ID [{key_id}] not found in {KEYS_FILE}.", file=sys.stderr)
 
 
 def main():
     """Main CLI entry point for API key management."""
+    global KEYS_FILE
+
     parser = argparse.ArgumentParser(description="MVCP Control Plane API Key Manager")
+    parser.add_argument(
+        "--file",
+        type=Path,
+        help="Override target path to keys.json (defaults to KEYS_FILE_PATH env var or src/control_plane/data/keys.json)",
+    )
+
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # Subcommand: create
@@ -180,6 +171,9 @@ def main():
     parser_revoke.add_argument("--key-id", required=True, help="ID of the key to revoke")
 
     args = parser.parse_args()
+
+    if args.file:
+        KEYS_FILE = args.file.resolve()
 
     if args.command == "create":
         scopes_list = [s.strip() for s in args.scopes.split(",") if s.strip()]

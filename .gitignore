@@ -1,5 +1,5 @@
-# Active Platform Credentials (NEVER COMMIT)
-provision_config.json
+# API Key Storage for Local Development
+src/control_plane/data/keys.json
 
 # Local Python Environment & Caches
 __pycache__/
