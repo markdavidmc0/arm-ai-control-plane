@@ -1,0 +1,18 @@
+[project]
+name = "data-plane"
+version = "0.1.0"
+description = "Arm Federated AI - gVisor Data Plane Worker"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.28.1",
+    "fastmcp>=3.4.4",
+    "pydantic-ai>=0.0.20",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Explicitly include flat layout files/folders inside src/data_plane
+[tool.hatch.build.targets.wheel]
+packages = ["."]

@@ -1,4 +1,4 @@
-name: Platform Control Plane CI/CD Pipeline
+name: Platform Core CI/CD Pipeline
 
 on:
   push:
@@ -9,39 +9,90 @@ on:
 
 jobs:
   test-and-validate:
-    name: Pytest Unit Tests & Schema Validation
+    name: Linting & Unit Testing
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+      - name: Install uv and Set Up Python
+        uses: astral-sh/setup-uv@v5
         with:
+          enable-cache: true
           python-version: '3.12'
 
-      - name: Install uv Package Manager
+      - name: Run Ruff Linter
         run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          uv sync --all-packages
+          uv run ruff check .
 
-      - name: Run Pytest Test Suite & Smoke Tests
+      - name: Run Pytest Test Suite
         env:
           GATEWAY_BASE_URL: "in-memory"
         run: |
-          uv sync
           uv run pytest -m "smoke or (not heavy and not kind)"
 
-  build-and-deploy:
-    name: Build Container Images & Trigger Kubernetes Rolling Update
+  build-and-push:
+    name: Build & Push (${{ matrix.service.name }})
     needs: [test-and-validate]
     if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    # Use native Arm64 runners for fast container compilation without QEMU overhead
+    runs-on: ubuntu-24.04-arm
+
+    strategy:
+      matrix:
+        service:
+          - name: control-plane
+            context: src/control_plane
+            dockerfile: src/control_plane/docker/Dockerfile
+            image: us-central1-docker.pkg.dev/sovereign-ai-495715/mvcp/arm-control-plane
+          - name: data-plane
+            context: src/data_plane
+            dockerfile: src/data_plane/docker/Dockerfile
+            image: us-central1-docker.pkg.dev/sovereign-ai-495715/mvcp/arm-data-plane-worker
+
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud via Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/389363417412/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider'
+          service_account: 'mvcp-github-ci-sa@sovereign-ai-495715.iam.gserviceaccount.com'
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
+      - name: Build & Push Image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.service.context }}
+          file: ${{ matrix.service.dockerfile }}
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ matrix.service.image }}:${{ github.ref_name }}
+            ${{ matrix.service.image }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-to-gke:
+    name: Rolling Update to GKE
+    needs: [build-and-push]
     runs-on: ubuntu-latest
 
     permissions:
       contents: 'read'
-      id-token: 'write' # Required for requesting OIDC JWT token from GitHub
+      id-token: 'write'
 
     steps:
       - name: Checkout Code
@@ -58,41 +109,27 @@ jobs:
         with:
           install_components: 'gke-gcloud-auth-plugin'
 
-      - name: Set up QEMU for Arm64 Emulation
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx (Cache Optimization)
-        uses: docker/setup-buildx-action@v3
-
-      - name: Configure Docker for Artifact Registry
-        run: gcloud auth configure-docker gcr.io --quiet
-
-      - name: Build & Push Arm64 Control Plane Gateway Image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/arm64
-          push: true
-          tags: |
-            gcr.io/sovereign-ai-495715/mvcp-gateway:${{ github.ref_name }}
-            gcr.io/sovereign-ai-495715/mvcp-gateway:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
       - name: Get GKE Cluster Credentials
         run: |
           gcloud container clusters get-credentials mvcp-gke-cluster \
             --zone us-central1-a \
             --project sovereign-ai-495715
 
-      - name: Apply Kubernetes Rolling Update (Zero Downtime)
+      - name: Apply Core Platform Infrastructure & Updates
         run: |
-          kubectl apply -f .platform/deployments/runtime-class.yaml
-          kubectl apply -f .platform/deployments/coredns-custom.yaml
-          kubectl apply -f .platform/deployments/internal-https-proxy.yaml
-          kubectl apply -f .platform/deployments/keycloak.yaml
-          kubectl apply -f .platform/deployments/gateway-and-envoy.yaml
-          kubectl apply -f .platform/deployments/in-house-mcp-servers.yaml
-          kubectl apply -f .platform/deployments/ingress.yaml
-          kubectl set image deployment/mvcp-gateway-deployment control-plane-gateway=gcr.io/sovereign-ai-495715/mvcp-gateway:${{ github.ref_name }}
-          kubectl rollout status deployment/mvcp-gateway-deployment --timeout=300s
+          # 1. Apply platform runtime classes, CoreDNS, and shared ingress
+          kubectl apply -f infra/deployments/shared/
+
+          # 2. Apply Control Plane components (Keycloak, API gateway)
+          kubectl apply -f infra/deployments/control_plane/
+
+          # 3. Apply Data Plane worker nodes and agent execution resources
+          kubectl apply -f infra/deployments/data_plane/
+
+          # Update container images to the ref/tag release build
+          kubectl set image deployment/control-plane-deployment control-plane=us-central1-docker.pkg.dev/sovereign-ai-495715/mvcp/arm-control-plane:${{ github.ref_name }}
+          kubectl set image deployment/data-plane-worker-deployment data-plane-worker=us-central1-docker.pkg.dev/sovereign-ai-495715/mvcp/arm-data-plane-worker:${{ github.ref_name }}
+
+          # Verify deployment rollouts
+          kubectl rollout status deployment/control-plane-deployment --timeout=300s
+          kubectl rollout status deployment/data-plane-worker-deployment --timeout=300s

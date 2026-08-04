@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-tool-server-deployment
+  namespace: data-plane
+  labels:
+    app: mcp-tool-server
+    app.kubernetes.io/part-of: data-plane
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mcp-tool-server
+  template:
+    metadata:
+      labels:
+        app: mcp-tool-server
+        app.kubernetes.io/part-of: data-plane
+    spec:
+      runtimeClassName: gvisor
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      tolerations:
+      - key: "kubernetes.io/arch"
+        operator: "Equal"
+        value: "arm64"
+        effect: "NoSchedule"
+      - key: "sandbox.gke.io/runtime"
+        operator: "Equal"
+        value: "gvisor"
+        effect: "NoSchedule"
+      containers:
+      - name: mcp-python-runner
+        image: us-central1-docker.pkg.dev/sovereign-ai-495715/mvcp/mcp-python-runner:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+        env:
+        - name: WORKER_CONCURRENCY
+          value: "4"
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+          limits:
+            cpu: "2000m"
+            memory: "2048Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-tool-server-service
+  namespace: data-plane
+spec:
+  type: ClusterIP
+  selector:
+    app: mcp-tool-server
+  ports:
+  - protocol: TCP
+    port: 8000
+    targetPort: 8000

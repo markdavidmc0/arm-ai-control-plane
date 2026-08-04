@@ -18,15 +18,6 @@ venv/
 *.tfvars
 *.tfvars.json
 
-# Node Modules & Frontend Build Artifacts
-node_modules/
-dist/
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
 # Operating System & IDE Files
 .DS_Store
 .vscode/
@@ -34,15 +25,13 @@ dist/
 *.swp
 *.swo
 
-# Dynamically Generated Telemetry & Visualizer Artifacts
-vectorization_heatmap.html
+# --- Additional Python & Tool Caches ---
+.ruff_cache/
+.logfire
+.uv/
 
-# Compiled C++ Executables & Performance Benchmarks
-src/mock_workload/matrix_benchmark
-src/mock_workload/matrix_fallback_benchmark
-src/mock_workload/*_benchmark
-
-# Playwright Test Results & Reports
-src/frontend/test-results/
-src/frontend/playwright-report/
-
+# --- Test Coverage & Build Artifacts ---
+.coverage
+htmlcov/
+coverage.xml
+*.egg-info/

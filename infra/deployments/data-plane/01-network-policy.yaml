@@ -1,0 +1,34 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: isolate-data-plane
+  namespace: data-plane
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: data-plane
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow traffic ONLY from Control Plane Gateways
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: control-plane
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: envoy-gateway
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    # Restrict egress strictly to DNS resolution
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53

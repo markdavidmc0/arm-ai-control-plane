@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: envoy-edge-guard-deployment
+  namespace: default
+  labels:
+    app: envoy-edge-guard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: envoy-edge-guard
+  template:
+    metadata:
+      labels:
+        app: envoy-edge-guard
+    spec:
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      tolerations:
+      - key: "kubernetes.io/arch"
+        operator: "Equal"
+        value: "arm64"
+        effect: "NoSchedule"
+      containers:
+      - name: envoy-proxy
+        image: envoyproxy/envoy:v1.28.0
+        ports:
+        - name: http
+          containerPort: 10000
+        - name: https
+          containerPort: 10001
+        volumeMounts:
+        - name: envoy-config-volume
+          mountPath: /etc/envoy
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+      volumes:
+      - name: envoy-config-volume
+        configMap:
+          name: envoy-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: envoy-edge-guard-service
+  namespace: default
+spec:
+  type: LoadBalancer
+  selector:
+    app: envoy-edge-guard
+  ports:
+  - name: http
+    protocol: TCP
+    port: 80
+    targetPort: 10000
+  - name: https
+    protocol: TCP
+    port: 443
+    targetPort: 10001

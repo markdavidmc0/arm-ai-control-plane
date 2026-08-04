@@ -94,14 +94,6 @@ def test_client():
 
 
 @pytest.fixture
-def mock_orchestrator():
-    """Returns an AsyncMock instance for SandboxOrchestrator."""
-    orchestrator = AsyncMock()
-    orchestrator.k8s_client_configured = False
-    return orchestrator
-
-
-@pytest.fixture
 def mock_dispatcher():
     """Returns an AsyncMock instance for LocalToolDispatcher."""
     dispatcher = AsyncMock()

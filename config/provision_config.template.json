@@ -1,8 +1,0 @@
-{
-  "project_id": "your-gcp-project-id",
-  "region": "us-central1",
-  "zone": "us-central1-a",
-  "cluster_name": "mvcp-gke-cluster",
-  "docker_image_name": "gcr.io/your-gcp-project-id/mobile-ndk-kleidiai:latest",
-  "backend_image_name": "gcr.io/your-gcp-project-id/control-plane-backend:latest"
-}

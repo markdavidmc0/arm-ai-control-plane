@@ -1,19 +1,14 @@
 [project]
-name = "arm-federated-ai"
-version = "1.0.0"
-description = "GKE-sandboxed Mobile AI cross-compilation workloads platform"
-readme = "README.md"
-requires-python = ">=3.10"
-dependencies = [
-    "fastapi>=0.110.0",
-    "uvicorn>=0.28.0",
-    "pydantic>=2.6.0",
-    "mcp>=1.28.1",
-    "fastmcp>=3.4.4",
-    "logfire[system-metrics]>=4.39.0",
-    "pydantic-ai>=0.0.20",
-    "pydantic-ai-harness[codemode]>=0.1.0",
-    "litellm<1.80.0",
+name = "arm-federated-ai-workspace"
+version = "0.1.0"
+description = "Root workspace for Arm Federated AI platform"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.uv.workspace]
+members = [
+    "src/control_plane",
+    "src/data_plane",
 ]
 
 [dependency-groups]
@@ -26,7 +21,7 @@ dev = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = [
@@ -39,25 +34,36 @@ select = [
     "UP",  # pyupgrade (modernizes python syntax)
 ]
 ignore = [
-    "D100",  # Missing docstring in public module (we can skip top-of-file boilerplate)
+    "D100",  # Missing docstring in public module
     "D104",  # Missing docstring in public package (__init__.py)
-    "D107",  # Missing docstring in __init__ (covered by class level docstrings)
+    "D107",  # Missing docstring in __init__
 ]
 
 [tool.ruff.lint.pydocstyle]
-convention = "google" # Enforce Google-style docstrings exclusively
+convention = "google"
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
 force-single-line = false
 
 [tool.pytest.ini_options]
-pythonpath = ["."]   # Automatically makes 'src' accessible to all tests
-testpaths = ["tests"] # Restricts test scanning only to the tests folder
+pythonpath = ["src/control_plane", "src/data_plane", "."]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
 markers = [
-    "kind: marks tests requiring a live KinD Kubernetes cluster",
-    "live_cluster: Integration tests targeting live GKE or local Kubernetes clusters via port-forwarding",
+    # --- Existing Infrastructure & Execution Markers ---
     "smoke: Fast execution (<10s) gateway readiness and RPC checks.",
-    "heavy: marks slow, multi-turn agent benchmark scenarios",
+    "kind: Marks tests requiring a live KinD Kubernetes cluster",
+    "live_cluster: Integration tests targeting live GKE or local Kubernetes clusters via port-forwarding",
+    "heavy: Marks slow, multi-turn agent benchmark scenarios",
+
+    # --- Structural Hierarchy Markers ---
+    "unit: Fast isolated unit tests (no network or external services)",
+    "integration: Cross-module contract and in-memory routing tests",
+    "e2e: End-to-end full deployment tests",
+    "benchmark: Performance, token, and latency benchmark suite",
 ]
 
+# Prevent accidental execution of slow cluster/heavy tests during plain `uv run pytest`
+addopts = "-m 'not heavy and not kind and not live_cluster'"

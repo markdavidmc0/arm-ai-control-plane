@@ -1,0 +1,21 @@
+[project]
+name = "control-plane"
+version = "0.1.0"
+description = "Arm Federated AI - Gateway Control Plane"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.28.0",
+    "pydantic>=2.6.0",
+    "httpx[http2]>=0.27.0",
+    "pyjwt[crypto]>=2.8.0",
+    "logfire>=4.39.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Explicitly include flat layout files/folders inside src/control_plane
+[tool.hatch.build.targets.wheel]
+packages = ["."]
