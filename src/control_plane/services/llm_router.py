@@ -1,7 +1,8 @@
 """Async Cloud-Agnostic LLM Proxy Router Service using LiteLLM.
 
 Forwards `/v1/chat/completions` requests to multi-provider backends (Anthropic, OpenAI, Gemini)
-via an injected LLM execution client. Computes costs via `completion_cost` and injects telemetry headers:
+via an injected LLM execution client. Computes costs via `completion_cost` and injects telemetry
+headers:
 - `X-LLM-Cost-USD`
 - `X-LLM-Prompt-Tokens`
 - `X-LLM-Completion-Tokens`
@@ -23,6 +24,7 @@ class LLMClientProtocol(Protocol):
     """Protocol for LLM completion execution."""
 
     async def acompletion(self, **kwargs: Any) -> Any:
+        """Executes async completion call."""
         ...
 
 
@@ -30,6 +32,7 @@ class LiteLLMClient:
     """Default production client wrapping LiteLLM's async completion execution."""
 
     async def acompletion(self, **kwargs: Any) -> Any:
+        """Executes LiteLLM async completion call."""
         return await litellm.acompletion(**kwargs)
 
 

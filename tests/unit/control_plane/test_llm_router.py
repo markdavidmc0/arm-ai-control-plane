@@ -4,7 +4,7 @@ import litellm
 import pytest
 
 from src.control_plane.dependencies import get_llm_router_service
-from src.control_plane.services.llm_router import LLMRouterService, LiteLLMClient
+from src.control_plane.services.llm_router import LiteLLMClient, LLMRouterService
 
 
 @pytest.mark.asyncio

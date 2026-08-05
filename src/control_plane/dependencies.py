@@ -1,21 +1,23 @@
 """Centralized FastAPI Dependency Injection container."""
 
-from typing import Any
-
 from fastapi import Depends, Header, HTTPException, status
+from pydantic import BaseModel, Field
 
-from src.control_plane.services.auth_service import AuthService
 from src.control_plane.services.llm_router import (
+    LiteLLMClient,
     LLMClientProtocol,
     LLMRouterService,
-    LiteLLMClient,
 )
 
-# --- Service Providers ---
 
-def get_auth_service() -> AuthService:
-    """Dependency provider for AuthService."""
-    return AuthService()
+class UserContext(BaseModel):
+    """User context container parsed from pre-authenticated Envoy HTTP headers."""
+
+    user_id: str = Field(..., description="Unique user identifier from X-User-ID header")
+    role: str = Field("user", description="User role from X-User-Role header")
+    scopes: list[str] = Field(
+        default_factory=list, description="User scope list from X-User-Scopes header"
+    )
 
 
 def get_llm_client() -> LLMClientProtocol:
@@ -32,31 +34,36 @@ def get_llm_router_service(
 
 # --- Route Guard / Security Dependencies ---
 
-async def verify_authentication(
-    authorization: str | None = Header(default=None),
-    auth_service: AuthService = Depends(get_auth_service),
-) -> dict[str, Any]:
-    """FastAPI dependency enforcing API Key authentication on proxy endpoints."""
-    if not authorization or not authorization.startswith("Bearer "):
+
+async def get_user_context(
+    x_user_id: str | None = Header(None, alias="X-User-ID"),
+    x_user_role: str | None = Header("user", alias="X-User-Role"),
+    x_user_scopes: str | None = Header("", alias="X-User-Scopes"),
+) -> UserContext:
+    """Extracts pre-validated identity claims injected downstream by Envoy Edge Guard.
+
+    Args:
+        x_user_id: Injected user ID header.
+        x_user_role: Injected user role header.
+        x_user_scopes: Injected comma-separated user scopes header.
+
+    Returns:
+        UserContext instance containing identity claims.
+
+    Raises:
+        HTTPException: HTTP 401 Unauthorized if X-User-ID is missing or empty.
+    """
+    if not x_user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid Authorization header",
+            detail="Missing upstream identity header (X-User-ID)",
         )
 
-    raw_key = authorization.removeprefix("Bearer ").strip()
+    scopes_str = x_user_scopes or ""
+    scopes_list = [s.strip() for s in scopes_str.split(",") if s.strip()]
 
-    # Dynamic await support for sync or async AuthService methods
-    auth_result = (
-        auth_service.authenticate_key(raw_key)
-        if hasattr(auth_service, "authenticate_key")
-        else auth_service.verify_key(raw_key)
+    return UserContext(
+        user_id=x_user_id,
+        role=x_user_role or "user",
+        scopes=scopes_list,
     )
-    key_info = await auth_result if hasattr(auth_result, "__await__") else auth_result
-
-    if not key_info:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or revoked API key",
-        )
-
-    return key_info

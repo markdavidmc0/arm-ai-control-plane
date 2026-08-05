@@ -1,8 +1,8 @@
 """Unit test suite fixtures and global mocks."""
 
 import pytest
-# Fix: Import directly from centralized dependencies module
-from src.control_plane.dependencies import verify_authentication
+
+from src.control_plane.dependencies import UserContext, get_user_context
 
 
 @pytest.fixture(autouse=True)
@@ -16,12 +16,13 @@ def mock_auth_bypass(request: pytest.FixtureRequest, app):
         yield
         return
 
-    app.dependency_overrides[verify_authentication] = lambda: {
-        "key_id": "unit-test-key-001",
-        "name": "Unit Test Harness",
-    }
+    app.dependency_overrides[get_user_context] = lambda: UserContext(
+        user_id="unit-test-user-001",
+        role="admin",
+        scopes=["llm:proxy", "tools:register"],
+    )
     yield
-    app.dependency_overrides.pop(verify_authentication, None)
+    app.dependency_overrides.pop(get_user_context, None)
 
 
 @pytest.fixture(autouse=True)

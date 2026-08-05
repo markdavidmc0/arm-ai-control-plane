@@ -5,11 +5,13 @@ injecting operational cost and token usage headers into every client response.
 """
 
 from typing import Any
-from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
+
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from src.control_plane.dependencies import (
+    UserContext,
     get_llm_router_service,
-    verify_authentication,
+    get_user_context,
 )
 from src.control_plane.services.llm_router import LLMRouterService
 
@@ -20,10 +22,24 @@ router = APIRouter(prefix="/v1", tags=["LLM Proxy Router"])
 async def chat_completions_proxy(
     payload: dict[str, Any],
     response: Response,
-    auth_data: dict[str, Any] = Depends(verify_authentication),
+    user: UserContext = Depends(get_user_context),
     llm_service: LLMRouterService = Depends(get_llm_router_service),
 ):
-    """Proxy endpoint for LLM completion calls injecting cost/token metadata headers."""
+    """Proxy endpoint for LLM completion calls injecting cost/token metadata headers.
+
+    Args:
+        payload: OpenAI-compatible completion request payload dictionary.
+        response: FastAPI response object for injecting cost headers.
+        user: Pre-authenticated UserContext injected downstream by Envoy Edge Guard.
+        llm_service: LLMRouterService instance for model completion routing.
+
+    Returns:
+        JSON response payload from the LLM provider.
+
+    Raises:
+        HTTPException: 400 Bad Request if 'messages' field is missing or invalid.
+        HTTPException: 502 Bad Gateway if LLM execution fails.
+    """
     if "messages" not in payload or not isinstance(payload["messages"], list):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

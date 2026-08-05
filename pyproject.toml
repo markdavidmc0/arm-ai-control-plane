@@ -64,6 +64,7 @@ markers = [
     "e2e: End-to-end full deployment tests",
     "benchmark: Performance, token, and latency benchmark suite",
 
+    "contract: Contract tests for API gateway and proxy interfaces",
     "unauthenticated: Opt out of automatic authentication dependency overrides in unit tests"
 ]
 
