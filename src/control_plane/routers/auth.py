@@ -6,13 +6,13 @@ and `/realms/arm-platform/protocol/openid-connect/token` for Keycloak M2M OAuth2
 
 from typing import Any
 
-from fastapi import APIRouter, Form, Header, Request, status
+from fastapi import APIRouter, Depends, Form, Header, Request, status
 from fastapi.responses import JSONResponse
 
+from src.control_plane.dependencies import get_auth_service
 from src.control_plane.services.auth_service import AuthService
 
 router = APIRouter(tags=["Zero-Trust Auth Guard & Keycloak OIDC"])
-auth_service = AuthService()
 
 
 @router.api_route("/api/v1/internal/auth-check", methods=["GET", "POST"])
@@ -21,6 +21,7 @@ async def envoy_ext_authz_check(
     request: Request,
     x_judge_api_key: str | None = Header(None, alias="x-judge-api-key"),
     authorization: str | None = Header(None, alias="authorization"),
+    auth_service: AuthService = Depends(get_auth_service),
 ):
     """Sidecar authentication check endpoint called by Envoy proxy.
 
@@ -99,6 +100,7 @@ async def keycloak_token_endpoint(
     subject_issuer: str | None = Form(None),
     client_assertion: str | None = Form(None),
     client_assertion_type: str | None = Form(None),
+    auth_service: AuthService = Depends(get_auth_service),
 ):
     """Keycloak M2M OAuth2 Token Endpoint returning JWT access tokens.
 

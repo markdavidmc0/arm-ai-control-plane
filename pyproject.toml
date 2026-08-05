@@ -63,6 +63,8 @@ markers = [
     "integration: Cross-module contract and in-memory routing tests",
     "e2e: End-to-end full deployment tests",
     "benchmark: Performance, token, and latency benchmark suite",
+
+    "unauthenticated: Opt out of automatic authentication dependency overrides in unit tests"
 ]
 
 # Prevent accidental execution of slow cluster/heavy tests during plain `uv run pytest`

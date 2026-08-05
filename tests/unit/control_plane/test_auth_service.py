@@ -3,9 +3,12 @@
 import base64
 import json
 import time
+from unittest.mock import MagicMock
 
 import pytest
+from fastapi import HTTPException
 
+from src.control_plane.dependencies import verify_authentication
 from src.control_plane.services.auth_service import AuthService, hash_key
 
 
@@ -144,3 +147,37 @@ def test_auth_service_missing_role_jwt_rejection():
 
     unauthorized_jwt = f"{header_b64}.{payload_b64}.mock_sig"
     assert auth_service.verify_jwt_token(unauthorized_jwt) is None
+
+
+@pytest.mark.unit
+@pytest.mark.unauthenticated
+@pytest.mark.asyncio
+async def test_verify_authentication_dependency_missing_header():
+    """Verify verify_authentication dependency raises 401 when auth header is missing."""
+    mock_auth_service = MagicMock(spec=AuthService)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await verify_authentication(
+            authorization=None,
+            auth_service=mock_auth_service,
+        )
+
+    assert exc_info.value.status_code == 401
+    assert "Missing or invalid Authorization header" in exc_info.value.detail
+
+
+@pytest.mark.unit
+@pytest.mark.unauthenticated
+@pytest.mark.asyncio
+async def test_verify_authentication_dependency_valid_header():
+    """Verify verify_authentication dependency extracts bearer key and calls auth service."""
+    mock_auth_service = MagicMock(spec=AuthService)
+    mock_auth_service.verify_key.return_value = {"key_id": "k123", "role": "dev"}
+
+    result = await verify_authentication(
+        authorization="Bearer valid_test_key_123",
+        auth_service=mock_auth_service,
+    )
+
+    assert result == {"key_id": "k123", "role": "dev"}
+    mock_auth_service.verify_key.assert_called_once_with("valid_test_key_123")

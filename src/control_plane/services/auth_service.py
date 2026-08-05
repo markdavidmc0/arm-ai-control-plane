@@ -42,10 +42,11 @@ class AuthService:
     # Class-level cache for Keycloak JWKS public keys
     _jwks_cache: dict[str, Any] = {"keys": [], "expires_at": 0.0}
 
-    def __init__(self, config_path: str = KEYS_FILE):
-        self.config_path = config_path
+    def __init__(self, config_path: str | Path | None = None):
+        if config_path is None:
+            config_path = os.getenv("KEYS_FILE_PATH", DEFAULT_KEYS_PATH)
+        self.config_path = Path(config_path).resolve()
         self.keys_db: list[dict[str, Any]] = []
-        # Sliding-window rate-limiting tracking: { key_id_or_ip: [timestamp1, timestamp2, ...] }
         self.rate_limit_records: dict[str, list[float]] = {}
         self.reload_keys()
 
