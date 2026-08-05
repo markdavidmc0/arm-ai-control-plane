@@ -1,7 +1,8 @@
 """Global Pytest Fixtures for Unit & Integration Test Suite."""
 
 import os
-from typing import Any, Generator
+from collections.abc import Generator
+from typing import Any
 from unittest.mock import AsyncMock
 
 import litellm
@@ -72,6 +73,7 @@ class MockLLMClient:
     """Test double providing deterministic completion responses for offline execution."""
 
     async def acompletion(self, **kwargs: Any) -> Any:
+        """Returns a deterministic mock ModelResponse for offline unit testing."""
         model = kwargs.get("model", "claude-3-5-sonnet")
         response_data = {
             "id": "chatcmpl-mock-123",
