@@ -1,6 +1,7 @@
 """Data Plane Isolated Request and Response Pydantic Schemas & Type Definitions.
 
-These models maintain complete schema isolation from Control Plane modules.
+These models maintain complete schema isolation from Control Plane modules and align
+with the MCP 2026-07-28 protocol specification.
 """
 
 from typing import Any, Literal
@@ -14,6 +15,8 @@ __all__ = [
     "DataPlaneJSONRPCError",
     "DataPlaneJSONRPCRequest",
     "DataPlaneJSONRPCResponse",
+    "ServerCapabilities",
+    "ServerDiscoverResult",
 ]
 
 
@@ -25,6 +28,7 @@ class DataPlaneUserContext(BaseModel):
     user_id: str = Field(..., description="Unique user identifier from downstream identity header")
     role: str = Field("user", description="Assigned authorization role")
     scopes: list[str] = Field(default_factory=list, description="List of granted permission scopes")
+    protocol_version: str = Field("2026-07-28", description="Negotiated MCP protocol version")
 
 
 class DataPlaneToolRequest(BaseModel):
@@ -68,16 +72,19 @@ class DataPlaneJSONRPCError(BaseModel):
 class DataPlaneJSONRPCRequest(BaseModel):
     """Pydantic schema for incoming MCP JSON-RPC 2.0 requests at the Data Plane boundary."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     jsonrpc: Literal["2.0"] = Field("2.0", description="JSON-RPC protocol version")
     id: str | int | None = Field(
-        None, description="Optional request identifier (None for notifications)"
+        default=None, description="Optional request identifier (None for notifications)"
     )
     method: str = Field(
         ..., description="Target JSON-RPC method name (e.g., 'tools/call', 'tools/list')"
     )
     params: dict[str, Any] = Field(default_factory=dict, description="Method parameter dictionary")
+    meta: dict[str, Any] | None = Field(
+        default=None, alias="_meta", description="Optional request metadata"
+    )
 
 
 class DataPlaneJSONRPCResponse(BaseModel):
@@ -86,8 +93,44 @@ class DataPlaneJSONRPCResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     jsonrpc: Literal["2.0"] = Field("2.0", description="JSON-RPC protocol version")
-    id: str | int | None = Field(..., description="Corresponding request identifier")
+    id: str | int | None = Field(
+        default=None, description="Corresponding request identifier (None for notifications)"
+    )
     result: Any | None = Field(None, description="Successful execution payload")
     error: DataPlaneJSONRPCError | None = Field(
         None, description="Structured error payload if request execution failed"
+    )
+
+
+class ServerCapabilities(BaseModel):
+    """Capabilities supported by the Data Plane FastMCP server (MCP 2026-07-28)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    tools: dict[str, Any] = Field(default_factory=dict, description="Supported tool capabilities")
+    resources: dict[str, Any] = Field(
+        default_factory=dict, description="Supported resource capabilities"
+    )
+    prompts: dict[str, Any] = Field(
+        default_factory=dict, description="Supported prompt capabilities"
+    )
+
+
+class ServerDiscoverResult(BaseModel):
+    """Response payload for stateless 'server/discover' method (MCP 2026-07-28)."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    protocol_versions: list[str] = Field(
+        default_factory=lambda: ["2026-07-28", "2025-11-25"],
+        alias="protocolVersions",
+        description="Supported MCP protocol versions",
+    )
+    capabilities: ServerCapabilities = Field(
+        default_factory=ServerCapabilities, description="Server capability definitions"
+    )
+    server_info: dict[str, Any] = Field(
+        default_factory=lambda: {"name": "data-plane-mcp", "version": "0.1.0"},
+        alias="serverInfo",
+        description="Server identity and version metadata",
     )

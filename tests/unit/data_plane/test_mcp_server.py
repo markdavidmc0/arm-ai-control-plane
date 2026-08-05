@@ -9,12 +9,21 @@ import pytest
 
 from src.data_plane.mcp_server import app, get_current_user_context
 
+DEFAULT_HEADERS = {
+    "X-User-ID": "usr_mcp_unit_test",
+    "X-User-Role": "developer",
+    "X-User-Scopes": "tools:execute",
+    "MCP-Protocol-Version": "2026-07-28",
+}
+
 
 @pytest.fixture
 async def async_mcp_client():
     """Fixture providing an httpx.AsyncClient targeting the in-memory FastMCP ASGI app."""
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://dataplane.test") as client:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://dataplane.test", headers=DEFAULT_HEADERS
+    ) as client:
         yield client
 
 
@@ -107,10 +116,11 @@ async def test_identity_header_extraction_and_context_reset(async_mcp_client):
 @pytest.mark.unit
 async def test_mcp_error_32700_parse_error(async_mcp_client):
     """Verify -32700 Parse Error returned when request body is non-JSON or malformed."""
+    headers = {**DEFAULT_HEADERS, "Content-Type": "application/json"}
     response = await async_mcp_client.post(
         "/api/v1/mcp",
         content="invalid json payload {{{",
-        headers={"Content-Type": "application/json"},
+        headers=headers,
     )
     assert response.status_code == 200
     data = response.json()
@@ -158,7 +168,7 @@ async def test_mcp_batch_request_rejection(async_mcp_client):
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
     ]
     response = await async_mcp_client.post("/api/v1/mcp", json=batch_payload)
-    assert response.status_code == 200
+    assert response.status_code == 422
     data = response.json()
     assert data["jsonrpc"] == "2.0"
     assert data["error"]["code"] == -32600

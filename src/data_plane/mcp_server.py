@@ -1,7 +1,7 @@
 """Standalone FastMCP Server & JSON-RPC 2.0 Data Plane Endpoint.
 
-Exposes `/api/v1/mcp` HTTP/2 JSON-RPC endpoint with isolated zero-trust identity propagation
-and LocalToolDispatcher tool execution routing.
+Exposes `/api/v1/mcp` HTTP/2 JSON-RPC endpoint with isolated zero-trust identity propagation,
+MCP 2026-07-28 header negotiation, and LocalToolDispatcher tool execution routing.
 """
 
 import json
@@ -18,6 +18,7 @@ from src.data_plane.schemas import (
     DataPlaneJSONRPCRequest,
     DataPlaneJSONRPCResponse,
     DataPlaneUserContext,
+    ServerDiscoverResult,
 )
 from src.data_plane.worker import LocalToolDispatcher
 
@@ -54,29 +55,35 @@ app = FastAPI(
 async def extract_identity_context_middleware(request: Request, call_next: Any) -> Response:
     """Middleware extracting downstream identity headers into a task-isolated ContextVar.
 
+    Enforces zero-trust upstream authentication by verifying the presence of X-User-ID.
     Uses a try...finally block with token.reset() to prevent cross-request context bleeding.
     """
     user_id = request.headers.get("X-User-ID")
-    token = None
 
-    if user_id:
-        role = request.headers.get("X-User-Role", "user")
-        raw_scopes = request.headers.get("X-User-Scopes", "")
-        scopes = [s.strip() for s in raw_scopes.split(",") if s.strip()]
-
-        ctx = DataPlaneUserContext(
-            user_id=user_id,
-            role=role,
-            scopes=scopes,
+    if not user_id:
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"detail": "Missing upstream identity header: X-User-ID"},
         )
-        token = user_context_var.set(ctx)
+
+    role = request.headers.get("X-User-Role", "user")
+    raw_scopes = request.headers.get("X-User-Scopes", "")
+    scopes = [s.strip() for s in raw_scopes.split(",") if s.strip()]
+    protocol_version = request.headers.get("MCP-Protocol-Version", "2026-07-28")
+
+    ctx = DataPlaneUserContext(
+        user_id=user_id,
+        role=role,
+        scopes=scopes,
+        protocol_version=protocol_version,
+    )
+    token = user_context_var.set(ctx)
 
     try:
         response = await call_next(request)
         return response
     finally:
-        if token is not None:
-            user_context_var.reset(token)
+        user_context_var.reset(token)
 
 
 @app.post("/api/v1/mcp", response_model=DataPlaneJSONRPCResponse)
@@ -84,7 +91,8 @@ async def handle_mcp_jsonrpc_endpoint(request: Request) -> JSONResponse:
     """Handles incoming JSON-RPC 2.0 MCP requests over HTTP/2.
 
     Supported methods:
-    - 'initialize': Returns FastMCP capabilities and server info.
+    - 'server/discover': Stateless MCP 2026-07-28 capabilities and version discovery.
+    - 'initialize': Legacy fallback for MCP discovery.
     - 'tools/list': Returns catalog of available tools.
     - 'tools/call': Executes tool via LocalToolDispatcher.
     """
@@ -114,7 +122,7 @@ async def handle_mcp_jsonrpc_endpoint(request: Request) -> JSONResponse:
 
     if isinstance(body, list):
         return JSONResponse(
-            status_code=status.HTTP_200_OK,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content=DataPlaneJSONRPCResponse(
                 jsonrpc="2.0",
                 id=None,
@@ -157,16 +165,12 @@ async def handle_mcp_jsonrpc_endpoint(request: Request) -> JSONResponse:
         )
 
     try:
-        if rpc_request.method == "initialize":
-            result_payload = {
-                "protocolVersion": "2.0",
-                "capabilities": {"tools": {}},
-                "serverInfo": {"name": "data-plane-mcp", "version": "0.1.0"},
-            }
+        if rpc_request.method in ("server/discover", "initialize"):
+            discover_result = ServerDiscoverResult().model_dump(by_alias=True)
             return JSONResponse(
                 status_code=status.HTTP_200_OK,
                 content=DataPlaneJSONRPCResponse(
-                    jsonrpc="2.0", id=rpc_request.id, result=result_payload
+                    jsonrpc="2.0", id=rpc_request.id, result=discover_result
                 ).model_dump(exclude_none=True),
             )
 
@@ -191,7 +195,8 @@ async def handle_mcp_jsonrpc_endpoint(request: Request) -> JSONResponse:
                         jsonrpc="2.0",
                         id=rpc_request.id,
                         error=DataPlaneJSONRPCError(
-                            code=-32600, message="Invalid Request: Tool name parameter required"
+                            code=-32602,
+                            message="Invalid Params: Tool name parameter required for tools/call",
                         ),
                     ).model_dump(exclude_none=True),
                 )
@@ -224,6 +229,15 @@ async def handle_mcp_jsonrpc_endpoint(request: Request) -> JSONResponse:
                 status_code=status.HTTP_200_OK,
                 content=DataPlaneJSONRPCResponse(
                     jsonrpc="2.0", id=rpc_request.id, result=res_payload
+                ).model_dump(exclude_none=True),
+            )
+
+        elif rpc_request.method.startswith("notifications/"):
+            # Notifications execution completes without requiring a result body
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content=DataPlaneJSONRPCResponse(
+                    jsonrpc="2.0", id=None, result={"status": "acknowledged"}
                 ).model_dump(exclude_none=True),
             )
 
