@@ -37,7 +37,7 @@ def test_user_context_valid_headers():
 
 @pytest.mark.contract
 def test_user_context_default_fallbacks():
-    """Verify get_user_context falls back to default role and empty scopes when optional headers are missing."""
+    """Verify get_user_context sets default role and empty scopes when headers are missing."""
     headers = {"X-User-ID": "usr_42"}
     response = client.get("/test-user-context", headers=headers)
     assert response.status_code == status.HTTP_200_OK

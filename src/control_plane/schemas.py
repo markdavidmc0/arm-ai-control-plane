@@ -1,23 +1,16 @@
 """Control Plane API Request and Response Pydantic Schemas & Type Definitions."""
 
-from dataclasses import dataclass
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
-@dataclass
-class ArmPlatformDeps:
-    """Dependency injection container passed to Pydantic AI agent runs.
-
-    Holds active session tokens, workspace metadata, and references
-    to network proxy services.
-    """
-
-    session_id: str
-    workspace_context: str = "cloud-ai"
-    user_id: str = "default-user"
-    mcp_proxy: Any = None
+__all__ = [
+    "UserContext",
+    "JSONRPCError",
+    "MCPJsonRPCRequest",
+    "MCPJsonRPCResponse",
+    "HealthStatusResponse",
+]
 
 
 class JSONRPCError(BaseModel):
@@ -61,3 +54,10 @@ class HealthStatusResponse(BaseModel):
     identity_layer: str = Field(
         "keycloak_wif", description="Identity and OIDC Workload Identity Federation provider"
     )
+
+class UserContext(BaseModel):
+    """User context container parsed from pre-authenticated Envoy HTTP headers."""
+
+    user_id: str
+    role: str = "user"
+    scopes: list[str] = Field(default_factory=list)

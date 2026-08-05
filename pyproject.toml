@@ -50,6 +50,8 @@ force-single-line = false
 pythonpath = ["src/control_plane", "src/data_plane", "."]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 markers = [
     # --- Existing Infrastructure & Execution Markers ---
@@ -60,12 +62,10 @@ markers = [
 
     # --- Structural Hierarchy Markers ---
     "unit: Fast isolated unit tests (no network or external services)",
+    "contract: Plane boundary and protocol contract tests",
     "integration: Cross-module contract and in-memory routing tests",
     "e2e: End-to-end full deployment tests",
     "benchmark: Performance, token, and latency benchmark suite",
-
-    "contract: Contract tests for API gateway and proxy interfaces",
-    "unauthenticated: Opt out of automatic authentication dependency overrides in unit tests"
 ]
 
 # Prevent accidental execution of slow cluster/heavy tests during plain `uv run pytest`

@@ -1,23 +1,38 @@
 """Centralized FastAPI Dependency Injection container."""
 
-from fastapi import Depends, Header, HTTPException, status
-from pydantic import BaseModel, Field
+from __future__ import annotations
 
+from collections.abc import AsyncGenerator
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+import httpx
+from fastapi import Depends, Header, HTTPException, status
+
+from src.control_plane.config import Settings, get_settings
+from src.control_plane.schemas import UserContext
 from src.control_plane.services.llm_router import (
     LiteLLMClient,
     LLMClientProtocol,
     LLMRouterService,
 )
 
+if TYPE_CHECKING:
+    from src.control_plane.services.agent_handler import AgentHandlerService
+    from src.control_plane.services.mcp_proxy import MCPProxyService
 
-class UserContext(BaseModel):
-    """User context container parsed from pre-authenticated Envoy HTTP headers."""
 
-    user_id: str = Field(..., description="Unique user identifier from X-User-ID header")
-    role: str = Field("user", description="User role from X-User-Role header")
-    scopes: list[str] = Field(
-        default_factory=list, description="User scope list from X-User-Scopes header"
-    )
+@dataclass
+class ArmPlatformDeps:
+    """Dependency injection container passed to Pydantic AI agent runs.
+
+    Holds references to active UserContext, MCPProxyService, and session metadata.
+    """
+
+    mcp_proxy: MCPProxyService
+    user_context: UserContext
+    session_id: str = "default-session"
+    workspace_context: str = "cloud-ai"
 
 
 def get_llm_client() -> LLMClientProtocol:
@@ -30,6 +45,20 @@ def get_llm_router_service(
 ) -> LLMRouterService:
     """Dependency provider for LLMRouterService."""
     return LLMRouterService(llm_client=llm_client)
+
+
+async def get_mcp_proxy(
+    settings: Settings = Depends(get_settings),
+) -> AsyncGenerator[MCPProxyService, None]:
+    """Dependency provider for MCPProxyService configuring client base_url."""
+    from src.control_plane.services.mcp_proxy import MCPProxyService
+
+    async with httpx.AsyncClient(
+        base_url=settings.DATA_PLANE_URL,
+        http2=True,
+        timeout=30.0,
+    ) as client:
+        yield MCPProxyService(client=client)
 
 
 # --- Route Guard / Security Dependencies ---
@@ -67,3 +96,27 @@ async def get_user_context(
         role=x_user_role or "user",
         scopes=scopes_list,
     )
+
+
+def get_arm_deps(
+    user_context: UserContext = Depends(get_user_context),
+    mcp_proxy: MCPProxyService = Depends(get_mcp_proxy),
+    session_id: str = Header("default-session", alias="X-Session-ID"),
+    workspace_context: str = Header("cloud-ai", alias="X-Workspace-Context"),
+) -> ArmPlatformDeps:
+    """Dependency provider combining UserContext, MCPProxyService, and request metadata."""
+    return ArmPlatformDeps(
+        mcp_proxy=mcp_proxy,
+        user_context=user_context,
+        session_id=session_id,
+        workspace_context=workspace_context,
+    )
+
+
+def get_agent_handler_service(
+    model: str = "openai:gpt-4o",
+) -> AgentHandlerService:
+    """Dependency provider for AgentHandlerService."""
+    from src.control_plane.services.agent_handler import AgentHandlerService
+
+    return AgentHandlerService(model=model)
