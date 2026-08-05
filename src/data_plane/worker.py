@@ -1,8 +1,8 @@
 """Unified Data Plane Worker & Execution Node.
 
 Combines multi-language tool dispatching (LocalToolDispatcher), Data Plane catalog
-discovery (/opt/arm-tools/catalog.json), SDK bridge (ArmToolsSDKBridge), and top-level await
-sandboxed REPL script execution (DataPlaneSandboxRunner) into a single unified Data Plane execution node.
+discovery (/opt/arm-tools/catalog.json), SDK bridge (ArmToolsSDKBridge), and top-level
+await sandboxed REPL script execution (DataPlaneSandboxRunner) into a unified execution node.
 """
 
 import asyncio
@@ -18,7 +18,7 @@ TOOLS_DIR = os.environ.get("ARM_TOOLS_DIR", "/opt/arm-tools")
 
 
 class LocalToolDispatcher:
-    """Dispatches tool calls to local multi-language binaries or scripts in the Data Plane sandbox."""
+    """Dispatches tool calls to local binaries or scripts in the Data Plane sandbox."""
 
     def __init__(self, tools_dir: str = TOOLS_DIR):
         self.tools_dir = tools_dir
@@ -37,7 +37,9 @@ class LocalToolDispatcher:
         return [
             {
                 "name": "optimize_kernel",
-                "description": "Cross-compiles and optimizes kernel code within a sandboxed data plane.",
+                "description": (
+                    "Cross-compiles and optimizes kernel code within a sandboxed data plane."
+                ),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -51,7 +53,9 @@ class LocalToolDispatcher:
             },
             {
                 "name": "profile_and_optimize_kernel",
-                "description": "Cross-compiles and benchmarks C++ matrix kernels in a remote gVisor sandbox.",
+                "description": (
+                    "Cross-compiles and benchmarks C++ matrix kernels in a remote gVisor sandbox."
+                ),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -65,7 +69,9 @@ class LocalToolDispatcher:
             },
             {
                 "name": "ros2_pointcloud_voxelizer_profile",
-                "description": "Profiles ROS2 PointCloud2 Voxel Grid filter performance on Arm Neoverse N2.",
+                "description": (
+                    "Profiles ROS2 PointCloud2 Voxel Grid filter performance on Arm Neoverse N2."
+                ),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -208,9 +214,12 @@ class LocalToolDispatcher:
                         "type": "text",
                         "text": (
                             "Arm Neoverse N2 Vectorization Profile:\n"
-                            f"- SME2 Utilization: {profile_res.get('sme2_utilization_pct', 82.4)}%\n"
-                            f"- Latency Impact: {profile_res.get('latency_ttft_impact', '78% TTFT Reduction')}\n"
-                            f"- Target Hardware: {profile_res.get('target_hardware', 'Cortex-X925')}"
+                            f"- SME2 Utilization: "
+                            f"{profile_res.get('sme2_utilization_pct', 82.4)}%\n"
+                            f"- Latency Impact: "
+                            f"{profile_res.get('latency_ttft_impact', '78% TTFT Reduction')}\n"
+                            f"- Target Hardware: "
+                            f"{profile_res.get('target_hardware', 'Cortex-X925')}"
                         ),
                     }
                 ],
@@ -243,11 +252,17 @@ class LocalToolDispatcher:
             default_catalog = [
                 {
                     "name": "profile_and_optimize_kernel",
-                    "description": "Cross-compiles and optimizes C++ matrix multiplication kernels using Arm KleidiAI Micro-kernels.",
+                    "description": (
+                        "Cross-compiles and optimizes C++ matrix multiplication "
+                        "kernels using Arm KleidiAI Micro-kernels."
+                    ),
                 },
                 {
                     "name": "ros2_pointcloud_voxelizer_profile",
-                    "description": "Profiles ROS2 PointCloud2 Voxel Grid filter performance on Arm Neoverse N2.",
+                    "description": (
+                        "Profiles ROS2 PointCloud2 Voxel Grid filter performance "
+                        "on Arm Neoverse N2."
+                    ),
                 },
             ]
             matches = [
@@ -270,7 +285,7 @@ class LocalToolDispatcher:
     async def _execute_simulated_workspace_tool(
         self, tool_name: str, args: dict[str, Any], start_time: float
     ) -> dict[str, Any]:
-        """Simulates native executable output for workspace tools when binary is compiled on-the-fly."""
+        """Simulates native executable output for workspace tools when compiled on-the-fly."""
         duration_ms = round((time.time() - start_time) * 1000.0 + 3.2, 2)
         return {
             "jsonrpc": "2.0",
@@ -282,7 +297,10 @@ class LocalToolDispatcher:
                 "content": [
                     {
                         "type": "text",
-                        "text": f"Successfully executed [{tool_name}] with arguments {args} inside gVisor Data Plane sandbox.",
+                        "text": (
+                            f"Successfully executed [{tool_name}] with arguments {args} "
+                            "inside gVisor Data Plane sandbox."
+                        ),
                     }
                 ],
                 "output_data": {
@@ -368,7 +386,8 @@ class DataPlaneSandboxRunner:
         """
         start_time = time.time()
         logger.info(
-            f"[Data Plane Worker] Executing CodeMode payload (timeout={self.timeout_seconds}s, memory_cap={self.memory_limit_mb}MB)"
+            f"[Data Plane Worker] Executing CodeMode payload "
+            f"(timeout={self.timeout_seconds}s, memory_cap={self.memory_limit_mb}MB)"
         )
 
         current_repl_state = dict(repl_state) if repl_state else {}

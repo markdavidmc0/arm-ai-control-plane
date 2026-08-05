@@ -60,20 +60,12 @@ def _check_forbidden_imports(target_dir: Path, forbidden_prefixes: tuple[str, ..
 @pytest.mark.unit
 def test_no_cross_plane_imports_in_control_plane():
     """Verify that src/control_plane/ contains ZERO direct imports of src.data_plane."""
-    violations = _check_forbidden_imports(
-        CONTROL_PLANE_DIR, ("src.data_plane", "data_plane")
-    )
-    assert not violations, (
-        "Control Plane boundary violation(s) found:\n" + "\n".join(violations)
-    )
+    violations = _check_forbidden_imports(CONTROL_PLANE_DIR, ("src.data_plane", "data_plane"))
+    assert not violations, "Control Plane boundary violation(s) found:\n" + "\n".join(violations)
 
 
 @pytest.mark.unit
 def test_no_cross_plane_imports_in_data_plane():
     """Verify that src/data_plane/ contains ZERO direct imports of src.control_plane."""
-    violations = _check_forbidden_imports(
-        DATA_PLANE_DIR, ("src.control_plane", "control_plane")
-    )
-    assert not violations, (
-        "Data Plane boundary violation(s) found:\n" + "\n".join(violations)
-    )
+    violations = _check_forbidden_imports(DATA_PLANE_DIR, ("src.control_plane", "control_plane"))
+    assert not violations, "Data Plane boundary violation(s) found:\n" + "\n".join(violations)

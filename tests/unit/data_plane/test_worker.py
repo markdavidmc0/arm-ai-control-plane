@@ -10,9 +10,9 @@ import json
 import pytest
 from pydantic_ai import Agent
 from pydantic_ai_harness import CodeMode
+from src.control_plane.services.mcp_multiplexer import MCPMultiplexerService
 
 from src.control_plane.schemas import ArmPlatformDeps
-from src.control_plane.services.mcp_multiplexer import MCPMultiplexerService
 from src.data_plane.worker import (
     DataPlaneSandboxRunner,
     LocalToolDispatcher,
@@ -73,7 +73,7 @@ result = run()
 
 @pytest.mark.asyncio
 async def test_prompt_cache_preservation():
-    """Verify system prompt schema prefix remains identical before and after dynamic catalog initialization."""
+    """Verify system prompt schema prefix remains identical before and after catalog init."""
     agent = create_arm_agent("anthropic:claude-3-5-sonnet")
 
     if isinstance(agent, dict):
@@ -136,7 +136,7 @@ async def test_deferred_mcp_toolset_building():
 
 @pytest.mark.asyncio
 async def test_top_level_await_execution():
-    """Verify DataPlaneSandboxRunner executes scripts with top-level await statements without SyntaxError."""
+    """Verify DataPlaneSandboxRunner executes scripts with top-level await statements."""
     runner = DataPlaneSandboxRunner(memory_limit_mb=512, timeout_seconds=10.0)
 
     code_snippet = """
@@ -174,7 +174,7 @@ result = res["result"]["status"]
 
 @pytest.mark.asyncio
 async def test_local_tool_dispatcher_compiler_kernel(tmp_path):
-    """Verify LocalToolDispatcher dispatches kernel compilation profiler tool calls via local binary driver."""
+    """Verify LocalToolDispatcher dispatches kernel compilation profiler tool calls."""
     tools_dir = str(tmp_path)
     driver_file = tmp_path / "compiler_driver"
 
@@ -200,7 +200,7 @@ async def test_local_tool_dispatcher_compiler_kernel(tmp_path):
 
 @pytest.mark.asyncio
 async def test_local_tool_dispatcher_search_meta_tool(tmp_path):
-    """Verify LocalToolDispatcher dispatches mcp__search_tools meta-tool calls against catalog.json."""
+    """Verify LocalToolDispatcher dispatches mcp__search_tools meta-tool calls."""
     tools_dir = str(tmp_path)
     catalog_file = tmp_path / "catalog.json"
 
