@@ -21,8 +21,8 @@ from src.data_plane.worker import (
 @asynccontextmanager
 async def data_plane_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """App lifespan context manager initializing stateful Data Plane execution workers."""
-    app.state.dispatcher = LocalToolDispatcher()
     app.state.sandbox_runner = DataPlaneSandboxRunner()
+    app.state.dispatcher = LocalToolDispatcher(sandbox_runner=app.state.sandbox_runner)
     yield
 
 

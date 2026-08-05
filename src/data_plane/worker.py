@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import time
 from typing import Any, Protocol
 
@@ -17,6 +18,7 @@ from src.data_plane.schemas import DataPlaneUserContext
 logger = logging.getLogger("mvcp.data_plane_worker")
 
 TOOLS_DIR = os.environ.get("ARM_TOOLS_DIR", "/opt/arm-tools")
+DEFAULT_TIMEOUT = float(os.environ.get("SANDBOX_TIMEOUT_SECONDS", "5.0"))
 
 
 class BaseToolDispatcher(Protocol):
@@ -48,9 +50,22 @@ class BaseToolDispatcher(Protocol):
 class LocalToolDispatcher:
     """Dispatches tool calls to local binaries or scripts in the Data Plane sandbox."""
 
-    def __init__(self, tools_dir: str = TOOLS_DIR, timeout_seconds: float = 10.0):
+    def __init__(
+        self,
+        tools_dir: str = TOOLS_DIR,
+        timeout_seconds: float | None = None,
+        sandbox_runner: Any | None = None,
+    ):
         self.tools_dir = tools_dir
-        self.timeout_seconds = timeout_seconds
+        self.timeout_seconds = timeout_seconds if timeout_seconds is not None else DEFAULT_TIMEOUT
+        self._sandbox_runner = sandbox_runner
+
+    @property
+    def sandbox_runner(self) -> "DataPlaneSandboxRunner":
+        """Property lazily instantiating DataPlaneSandboxRunner if not explicitly provided."""
+        if self._sandbox_runner is None:
+            self._sandbox_runner = DataPlaneSandboxRunner(timeout_seconds=self.timeout_seconds)
+        return self._sandbox_runner
 
     async def read_catalog(self) -> list[dict[str, Any]]:
         """Reads available tool entries from catalog.json or returns default tool catalog."""
@@ -64,6 +79,26 @@ class LocalToolDispatcher:
                 logger.error(f"[Data Plane Worker] Failed to read catalog.json: {e}")
 
         return [
+            {
+                "name": "repl_execute",
+                "description": (
+                    "Executes CodeMode Python script payloads within the sandboxed REPL."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "code": {
+                            "type": "string",
+                            "description": "Python code snippet to execute.",
+                        },
+                        "repl_state": {
+                            "type": "object",
+                            "description": "Optional REPL state mapping from previous turns.",
+                        },
+                    },
+                    "required": ["code"],
+                },
+            },
             {
                 "name": "optimize_kernel",
                 "description": (
@@ -113,10 +148,6 @@ class LocalToolDispatcher:
             },
         ]
 
-    async def _read_catalog(self) -> list[dict[str, Any]]:
-        """Backwards compatibility alias for read_catalog."""
-        return await self.read_catalog()
-
     async def dispatch_tool_call(
         self,
         tool_name: str,
@@ -133,14 +164,54 @@ class LocalToolDispatcher:
         Returns:
             JSON-RPC compliant result dictionary containing output content and status.
         """
-        start_time = time.time()
+        start_time = time.perf_counter()
         args = arguments or {}
         logger.info(
             f"[Data Plane Worker] Dispatching tool [{tool_name}] with args: {args} "
             f"(user={user_context.user_id if user_context else 'anonymous'})"
         )
 
-        # Enforce Path Traversal Prevention
+        if tool_name == "repl_execute":
+            code_snippet = args.get("code") or args.get("code_snippet") or ""
+            repl_state = args.get("repl_state") or {}
+            res = await self.sandbox_runner.execute_payload(
+                code_snippet=code_snippet,
+                repl_state=repl_state,
+                user_context=user_context,
+            )
+            duration_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
+
+            if res.get("status") == "error":
+                err_msg = res.get("error", "REPL execution failed")
+                if "timed out" in err_msg.lower():
+                    err_msg = "Execution timed out: Sandbox process exceeded time limit."
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32603,
+                        "message": err_msg,
+                    },
+                }
+
+            output_val = res.get("result")
+            content_list = []
+            if output_val is not None and output_val != "Execution completed successfully.":
+                content_list.append({"type": "text", "text": str(output_val)})
+
+            return {
+                "jsonrpc": "2.0",
+                "result": {
+                    "tool_name": "repl_execute",
+                    "status": "SUCCESS",
+                    "execution_time_ms": duration_ms,
+                    "output": output_val,
+                    "result": output_val,
+                    "content": content_list,
+                    "updated_repl_state": res.get("updated_repl_state", {}),
+                },
+            }
+
+        # Enforce Path Traversal Prevention for binary executions
         tools_dir_abs = os.path.abspath(self.tools_dir)
         target_path = os.path.abspath(os.path.join(self.tools_dir, tool_name))
 
@@ -164,7 +235,15 @@ class LocalToolDispatcher:
         elif tool_name == "mcp__search_tools":
             return await self._execute_search_tools(args, start_time)
         else:
-            return await self._execute_simulated_workspace_tool(tool_name, args, start_time)
+            return {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32601,
+                    "message": (
+                        f"Tool '{tool_name}' not found or executable binary missing in {self.tools_dir}."
+                    ),
+                },
+            }
 
     async def _execute_binary_subprocess(
         self,
@@ -183,11 +262,27 @@ class LocalToolDispatcher:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=self.timeout_seconds
-            )
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=self.timeout_seconds
+                )
+            except TimeoutError:
+                try:
+                    proc.kill()
+                    await proc.wait()
+                except Exception as kill_err:
+                    logger.error(
+                        f"[Data Plane Worker] Failed to kill process {proc.pid}: {kill_err}"
+                    )
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32603,
+                        "message": "Execution timed out: Sandbox process exceeded time limit.",
+                    },
+                }
 
-            duration_ms = round((time.time() - start_time) * 1000.0, 2)
+            duration_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
             raw_output = stdout.decode("utf-8").strip()
 
             try:
@@ -203,16 +298,6 @@ class LocalToolDispatcher:
                     "execution_time_ms": duration_ms,
                     "output": parsed_json,
                     "stderr": stderr.decode("utf-8").strip(),
-                },
-            }
-        except TimeoutError:
-            return {
-                "jsonrpc": "2.0",
-                "error": {
-                    "code": -32603,
-                    "message": (
-                        f"Subprocess tool [{tool_name}] timed out after {self.timeout_seconds}s."
-                    ),
                 },
             }
         except Exception as e:
@@ -231,34 +316,47 @@ class LocalToolDispatcher:
         source_code = args.get("source_code") or args.get("code", "void matmul() {}")
         driver_path = os.path.join(self.tools_dir, "compiler_driver")
 
-        if os.path.exists(driver_path) and os.access(driver_path, os.X_OK):
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    driver_path,
-                    "--code",
-                    source_code,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                stdout, stderr = await proc.communicate()
-                profile_res = json.loads(stdout.decode("utf-8"))
-            except Exception as e:
-                logger.error(f"[Data Plane Worker] compiler_driver failed: {e}")
-                profile_res = {"status": "error", "error": str(e)}
-        else:
-            import uuid
-
-            task_id = str(uuid.uuid4())
-            profile_res = {
-                "task_id": task_id,
-                "status": "success",
-                "target_hardware": "Cortex-X925 (Armv9-A)",
-                "runtime": "ExecuTorch + Arm KleidiAI Micro-kernels",
-                "sme2_utilization_pct": 82.4,
-                "latency_ttft_impact": "78% TTFT Latency Reduction",
+        if not (os.path.exists(driver_path) and os.access(driver_path, os.X_OK)):
+            return {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32603,
+                    "message": (
+                        f"Compiler driver binary missing or non-executable at '{driver_path}'."
+                    ),
+                },
             }
 
-        duration_ms = round((time.time() - start_time) * 1000.0, 2)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                driver_path,
+                "--code",
+                source_code,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                err_text = stderr.decode("utf-8").strip() or "Compilation failed"
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32603,
+                        "message": f"Compiler driver error: {err_text}",
+                    },
+                }
+            profile_res = json.loads(stdout.decode("utf-8"))
+        except Exception as e:
+            logger.error(f"[Data Plane Worker] compiler_driver failed: {e}")
+            return {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32603,
+                    "message": f"Compiler execution failed: {str(e)}",
+                },
+            }
+
+        duration_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
         return {
             "jsonrpc": "2.0",
             "result": {
@@ -271,11 +369,11 @@ class LocalToolDispatcher:
                         "text": (
                             "Arm Neoverse N2 Vectorization Profile:\n"
                             f"- SME2 Utilization: "
-                            f"{profile_res.get('sme2_utilization_pct', 82.4)}%\n"
+                            f"{profile_res.get('sme2_utilization_pct', 0)}%\n"
                             f"- Latency Impact: "
-                            f"{profile_res.get('latency_ttft_impact', '78% TTFT Reduction')}\n"
+                            f"{profile_res.get('latency_ttft_impact', 'N/A')}\n"
                             f"- Target Hardware: "
-                            f"{profile_res.get('target_hardware', 'Cortex-X925')}"
+                            f"{profile_res.get('target_hardware', 'Unknown')}"
                         ),
                     }
                 ],
@@ -286,48 +384,18 @@ class LocalToolDispatcher:
     async def _execute_search_tools(
         self, args: dict[str, Any], start_time: float
     ) -> dict[str, Any]:
-        """Executes search_tools meta-tool against local catalog.json file."""
+        """Executes search_tools meta-tool against registered catalog entries."""
         query = (args.get("query") or "").lower()
-        catalog_path = os.path.join(self.tools_dir, "catalog.json")
-        matches = []
+        tools_list = await self.read_catalog()
+        matches = [
+            t
+            for t in tools_list
+            if not query
+            or query in t.get("name", "").lower()
+            or query in t.get("description", "").lower()
+        ]
 
-        if os.path.exists(catalog_path):
-            try:
-                with open(catalog_path, encoding="utf-8") as f:
-                    catalog_data = json.load(f)
-                    tools_list = catalog_data.get("tools", [])
-                    matches = [
-                        t
-                        for t in tools_list
-                        if query in t.get("name", "").lower()
-                        or query in t.get("description", "").lower()
-                    ]
-            except Exception as e:
-                logger.error(f"[Data Plane Worker] Failed to read catalog.json: {e}")
-        else:
-            default_catalog = [
-                {
-                    "name": "profile_and_optimize_kernel",
-                    "description": (
-                        "Cross-compiles and optimizes C++ matrix multiplication "
-                        "kernels using Arm KleidiAI Micro-kernels."
-                    ),
-                },
-                {
-                    "name": "ros2_pointcloud_voxelizer_profile",
-                    "description": (
-                        "Profiles ROS2 PointCloud2 Voxel Grid filter performance "
-                        "on Arm Neoverse N2."
-                    ),
-                },
-            ]
-            matches = [
-                t
-                for t in default_catalog
-                if not query or query in t["name"].lower() or query in t["description"].lower()
-            ]
-
-        duration_ms = round((time.time() - start_time) * 1000.0, 2)
+        duration_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
         return {
             "jsonrpc": "2.0",
             "result": {
@@ -335,34 +403,6 @@ class LocalToolDispatcher:
                 "status": "SUCCESS",
                 "execution_time_ms": duration_ms,
                 "matches": matches,
-            },
-        }
-
-    async def _execute_simulated_workspace_tool(
-        self, tool_name: str, args: dict[str, Any], start_time: float
-    ) -> dict[str, Any]:
-        """Simulates native executable output for workspace tools when compiled on-the-fly."""
-        duration_ms = round((time.time() - start_time) * 1000.0 + 3.2, 2)
-        return {
-            "jsonrpc": "2.0",
-            "result": {
-                "tool_name": tool_name,
-                "status": "SUCCESS",
-                "execution_time_ms": duration_ms,
-                "target_architecture": "Arm Neoverse N2 (aarch64)",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": (
-                            f"Successfully executed [{tool_name}] with arguments {args} "
-                            "inside gVisor Data Plane sandbox."
-                        ),
-                    }
-                ],
-                "output_data": {
-                    "processed_args": args,
-                    "arm_pmu_counters": {"sve2_instructions": 128, "spills": 0},
-                },
             },
         }
 
@@ -402,11 +442,15 @@ arm_tools = ArmToolsSDKBridge()
 
 
 class DataPlaneSandboxRunner:
-    """Executes CodeMode Python scripts inside isolated Monty REPL sandboxes."""
+    """Executes CodeMode Python scripts inside isolated REPL sandboxes."""
 
-    def __init__(self, memory_limit_mb: int = 512, timeout_seconds: float = 30.0):
+    def __init__(
+        self,
+        memory_limit_mb: int = 512,
+        timeout_seconds: float | None = None,
+    ):
         self.memory_limit_mb = memory_limit_mb
-        self.timeout_seconds = timeout_seconds
+        self.timeout_seconds = timeout_seconds if timeout_seconds is not None else DEFAULT_TIMEOUT
 
     async def execute_payload(
         self,
@@ -415,127 +459,101 @@ class DataPlaneSandboxRunner:
         tool_bindings: dict[str, Any] | None = None,
         user_context: DataPlaneUserContext | None = None,
     ) -> dict[str, Any]:
-        """Runs a CodeMode Python script payload within the sandboxed Monty REPL.
-
-        Args:
-            code_snippet: The Python script code to execute.
-            repl_state: Existing REPL state dictionary from previous turn.
-            tool_bindings: Dictionary mapping tool names to callable functions/stubs.
-            user_context: Propagated DataPlaneUserContext for identity/scope validation.
-
-        Returns:
-            Dictionary containing execution result, updated REPL state, and latency metrics.
-        """
-        start_time = time.time()
-        logger.info(
-            f"[Data Plane Worker] Executing CodeMode payload "
-            f"(timeout={self.timeout_seconds}s, memory_cap={self.memory_limit_mb}MB)"
-        )
-
+        """Spawns an isolated Python process to execute code with timeout enforcement."""
+        start_time = time.perf_counter()
         current_repl_state = dict(repl_state) if repl_state else {}
 
-        # Validate Identity & Permission Scopes
-        if user_context and user_context.scopes:
-            if "read_only" in user_context.scopes and "tools:execute" not in user_context.scopes:
-                return {
-                    "status": "error",
-                    "error": (
-                        "Unauthorized: User context lacks required "
-                        "'tools:execute' permission scope."
-                    ),
-                    "updated_repl_state": current_repl_state,
-                    "execution_time_ms": round((time.time() - start_time) * 1000.0, 2),
-                }
+        # 1. Enforce user context identity and required scopes
+        if user_context and "tools:execute" not in getattr(user_context, "scopes", []):
+            return {
+                "status": "error",
+                "error": "Access denied: Missing required 'tools:execute' scope.",
+                "updated_repl_state": current_repl_state,
+                "execution_time_ms": 0.0,
+            }
 
-        tools = tool_bindings or {}
-
-        exec_globals = {
-            "asyncio": asyncio,
-            "arm_tools": arm_tools,
-            "__builtins__": __builtins__,
-            "__user_context__": user_context,
-            **tools,
-            **current_repl_state,
-        }
-        exec_locals: dict[str, Any] = {}
+        # 2. Self-contained bootstrap harness writing output exclusively to sys.__stdout__
+        sandbox_harness = (
+            "import sys, json, io, contextlib\n"
+            "code = sys.argv[1]\n"
+            "state = json.loads(sys.argv[2])\n"
+            "exec_globals = {'__builtins__': __builtins__, **state}\n"
+            "stdout_buf = io.StringIO()\n"
+            "try:\n"
+            "    with contextlib.redirect_stdout(stdout_buf):\n"
+            "        exec(code, exec_globals)\n"
+            "    valid_types = (int, float, str, bool, list, dict)\n"
+            "    updated_state = {\n"
+            "        k: v for k, v in exec_globals.items()\n"
+            "        if not k.startswith('__') and isinstance(v, valid_types)\n"
+            "    }\n"
+            "    res_val = updated_state.get('result', updated_state.get('output'))\n"
+            "    sys.__stdout__.write(json.dumps({\n"
+            "        'status': 'success',\n"
+            "        'result': res_val,\n"
+            "        'stdout': stdout_buf.getvalue(),\n"
+            "        'updated_repl_state': updated_state\n"
+            "    }))\n"
+            "except Exception as e:\n"
+            "    sys.__stdout__.write(json.dumps({'status': 'error', 'error': str(e)}))\n"
+        )
 
         try:
-            async with asyncio.timeout(self.timeout_seconds):
-                indented_code = "\n".join(f"    {line}" for line in code_snippet.splitlines())
-                valid_global_keys = [
-                    k
-                    for k in current_repl_state.keys()
-                    if k.isidentifier() and not k.startswith("__")
-                ]
-                global_decls = (
-                    f"    global {', '.join(valid_global_keys)}\n" if valid_global_keys else ""
-                )
-                wrapped_code = (
-                    "async def __code_mode_entry__():\n"
-                    f"{global_decls}"
-                    f"{indented_code}\n"
-                    "    return {k: v for k, v in locals().items() if not k.startswith('__')}\n"
-                )
+            # 3. Spawn child process to decouple execution from main event loop
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable,
+                "-c",
+                sandbox_harness,
+                code_snippet,
+                json.dumps(current_repl_state),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
 
-                exec(wrapped_code, exec_globals, exec_locals)
-                entry_fn = exec_locals["__code_mode_entry__"]
-                res = await entry_fn()
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=self.timeout_seconds
+            )
 
-                for k in current_repl_state:
-                    if k in exec_globals:
-                        current_repl_state[k] = exec_globals[k]
+            duration_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
+            raw_output = stdout.decode("utf-8").strip()
 
-                if isinstance(res, dict):
-                    for k, v in res.items():
-                        if not k.startswith("__"):
-                            current_repl_state[k] = v
-
-                for k, v in exec_locals.items():
-                    if not k.startswith("__") and k != "__code_mode_entry__":
-                        current_repl_state[k] = v
-
-                duration_ms = round((time.time() - start_time) * 1000.0, 2)
-                output_val = current_repl_state.get(
-                    "result",
-                    current_repl_state.get(
-                        "output",
-                        (res if not isinstance(res, dict) else "Execution completed successfully."),
-                    ),
-                )
-
-                if asyncio.iscoroutine(output_val):
-                    output_val = await output_val
-                    current_repl_state["result"] = output_val
-                elif callable(output_val) and asyncio.iscoroutinefunction(output_val):
-                    output_val = await output_val()
-                    current_repl_state["result"] = output_val
-
+            if proc.returncode != 0 or not raw_output:
+                err_msg = stderr.decode("utf-8").strip() or "REPL child process exited abruptly."
                 return {
-                    "status": "success",
-                    "result": output_val,
+                    "status": "error",
+                    "error": err_msg,
                     "updated_repl_state": current_repl_state,
                     "execution_time_ms": duration_ms,
-                    "memory_limit_mb": self.memory_limit_mb,
-                    "sandbox_mode": "monty_repl_dataplane",
                 }
 
+            out_data = json.loads(raw_output)
+            out_data["execution_time_ms"] = duration_ms
+            return out_data
+
         except TimeoutError:
-            logger.error(
-                f"[Data Plane Worker] CodeMode execution timed out after {self.timeout_seconds}s."
-            )
+            # 4. Force-terminate runaway subprocess (SIGKILL) and await process cleanup
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception as kill_err:
+                logger.error(
+                    f"[Data Plane Worker] Failed to kill child process {proc.pid}: {kill_err}"
+                )
+
+            duration_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
             return {
                 "status": "error",
-                "error": f"Execution timed out after {self.timeout_seconds}s.",
+                "error": "Execution timed out: Sandbox process exceeded time limit.",
                 "updated_repl_state": current_repl_state,
-                "execution_time_ms": round((time.time() - start_time) * 1000.0, 2),
+                "execution_time_ms": duration_ms,
             }
         except Exception as e:
-            logger.error(f"[Data Plane Worker] CodeMode execution error: {e}")
+            duration_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
             return {
                 "status": "error",
-                "error": str(e),
+                "error": f"Sandbox runner error: {str(e)}",
                 "updated_repl_state": current_repl_state,
-                "execution_time_ms": round((time.time() - start_time) * 1000.0, 2),
+                "execution_time_ms": duration_ms,
             }
 
 
@@ -546,4 +564,5 @@ __all__ = [
     "DataPlaneSandboxRunner",
     "arm_tools",
     "TOOLS_DIR",
+    "DEFAULT_TIMEOUT",
 ]

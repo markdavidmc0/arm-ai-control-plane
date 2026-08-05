@@ -10,6 +10,7 @@ class FakeLLMClient:
     """In-memory fake implementing LLMClientProtocol without hitting third-party APIs."""
 
     async def acompletion(self, **kwargs):
+        """Mock completion handler returning simulated ModelResponse."""
         return litellm.ModelResponse(
             **{
                 "id": "chatcmpl-test-999",
