@@ -10,27 +10,56 @@ import json
 import logging
 import os
 import time
-from typing import Any
+from typing import Any, Protocol
+
+from src.data_plane.schemas import DataPlaneUserContext
 
 logger = logging.getLogger("mvcp.data_plane_worker")
 
 TOOLS_DIR = os.environ.get("ARM_TOOLS_DIR", "/opt/arm-tools")
 
 
+class BaseToolDispatcher(Protocol):
+    """Abstract protocol for Data Plane tool dispatching implementations."""
+
+    async def read_catalog(self) -> list[dict[str, Any]]:
+        """Reads available tool entries from catalog.json or returns default tool catalog."""
+        ...
+
+    async def dispatch_tool_call(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any] | None = None,
+        user_context: DataPlaneUserContext | None = None,
+    ) -> dict[str, Any]:
+        """Dispatches execution for a registered tool call name.
+
+        Args:
+            tool_name: Name of the target tool.
+            arguments: Dictionary of arguments passed to the tool call.
+            user_context: Propagated user identity context.
+
+        Returns:
+            JSON-RPC compliant result dictionary containing output content and status.
+        """
+        ...
+
+
 class LocalToolDispatcher:
     """Dispatches tool calls to local binaries or scripts in the Data Plane sandbox."""
 
-    def __init__(self, tools_dir: str = TOOLS_DIR):
+    def __init__(self, tools_dir: str = TOOLS_DIR, timeout_seconds: float = 10.0):
         self.tools_dir = tools_dir
+        self.timeout_seconds = timeout_seconds
 
-    async def _read_catalog(self) -> list[dict[str, Any]]:
+    async def read_catalog(self) -> list[dict[str, Any]]:
         """Reads available tool entries from catalog.json or returns default tool catalog."""
         catalog_path = os.path.join(self.tools_dir, "catalog.json")
         if os.path.exists(catalog_path):
             try:
                 with open(catalog_path, encoding="utf-8") as f:
                     catalog_data = json.load(f)
-                    return catalog_data.get("tools", [])
+                    return catalog_data.get("tools", [])  # type: ignore[no-any-return]
             except Exception as e:
                 logger.error(f"[Data Plane Worker] Failed to read catalog.json: {e}")
 
@@ -84,28 +113,51 @@ class LocalToolDispatcher:
             },
         ]
 
+    async def _read_catalog(self) -> list[dict[str, Any]]:
+        """Backwards compatibility alias for read_catalog."""
+        return await self.read_catalog()
+
     async def dispatch_tool_call(
-        self, tool_name: str, arguments: dict[str, Any] | None = None
+        self,
+        tool_name: str,
+        arguments: dict[str, Any] | None = None,
+        user_context: DataPlaneUserContext | None = None,
     ) -> dict[str, Any]:
         """Dispatches execution for a registered tool call name.
 
         Args:
             tool_name: Name of the target tool.
             arguments: Dictionary of arguments passed to the tool call.
+            user_context: Optional user identity context.
 
         Returns:
             JSON-RPC compliant result dictionary containing output content and status.
         """
         start_time = time.time()
         args = arguments or {}
-        logger.info(f"[Data Plane Worker] Dispatching tool [{tool_name}] with args: {args}")
+        logger.info(
+            f"[Data Plane Worker] Dispatching tool [{tool_name}] with args: {args} "
+            f"(user={user_context.user_id if user_context else 'anonymous'})"
+        )
 
-        executable_path = os.path.join(self.tools_dir, tool_name)
+        # Enforce Path Traversal Prevention
+        tools_dir_abs = os.path.abspath(self.tools_dir)
+        target_path = os.path.abspath(os.path.join(self.tools_dir, tool_name))
 
-        if os.path.exists(executable_path) and os.access(executable_path, os.X_OK):
-            return await self._execute_binary_subprocess(
-                tool_name, executable_path, args, start_time
-            )
+        if not target_path.startswith(f"{tools_dir_abs}{os.sep}") and target_path != tools_dir_abs:
+            logger.warning(f"[Data Plane Worker] Path traversal attempt blocked: {tool_name}")
+            return {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32602,
+                    "message": (
+                        f"Invalid Params: Tool name '{tool_name}' contains illegal path traversal."
+                    ),
+                },
+            }
+
+        if os.path.exists(target_path) and os.access(target_path, os.X_OK):
+            return await self._execute_binary_subprocess(tool_name, target_path, args, start_time)
 
         if tool_name in ["profile_and_optimize_kernel", "optimize_kernel"]:
             return await self._execute_compiler_kernel(args, start_time)
@@ -121,7 +173,7 @@ class LocalToolDispatcher:
         args: dict[str, Any],
         start_time: float,
     ) -> dict[str, Any]:
-        """Executes a native Arm binary or script via asyncio subprocess."""
+        """Executes a native Arm binary or script via direct vector asyncio subprocess (execve)."""
         try:
             json_args = json.dumps(args)
             proc = await asyncio.create_subprocess_exec(
@@ -131,7 +183,9 @@ class LocalToolDispatcher:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=self.timeout_seconds
+            )
 
             duration_ms = round((time.time() - start_time) * 1000.0, 2)
             raw_output = stdout.decode("utf-8").strip()
@@ -156,7 +210,9 @@ class LocalToolDispatcher:
                 "jsonrpc": "2.0",
                 "error": {
                     "code": -32603,
-                    "message": f"Subprocess tool [{tool_name}] timed out after 10s.",
+                    "message": (
+                        f"Subprocess tool [{tool_name}] timed out after {self.timeout_seconds}s."
+                    ),
                 },
             }
         except Exception as e:
@@ -314,19 +370,11 @@ class LocalToolDispatcher:
 class ArmToolsSDKBridge:
     """Python SDK bridge client exposed inside CodeMode Python execution environments."""
 
-    def __init__(self, dispatcher: LocalToolDispatcher | None = None):
+    def __init__(self, dispatcher: BaseToolDispatcher | None = None):
         self.dispatcher = dispatcher or LocalToolDispatcher()
 
     def call_tool(self, tool_name: str, **kwargs: Any) -> Any:
-        """Synchronous or awaitable entry point for calling registered platform tools.
-
-        Args:
-            tool_name: Target tool name.
-            **kwargs: Tool call arguments.
-
-        Returns:
-            Execution result dictionary or pending task.
-        """
+        """Synchronous or awaitable entry point for calling registered platform tools."""
         try:
             loop = asyncio.get_running_loop()
             return loop.create_task(self.dispatcher.dispatch_tool_call(tool_name, kwargs))
@@ -334,15 +382,7 @@ class ArmToolsSDKBridge:
             return asyncio.run(self.dispatcher.dispatch_tool_call(tool_name, kwargs))
 
     async def acall_tool(self, tool_name: str, **kwargs: Any) -> dict[str, Any]:
-        """Async entry point for executing tools inside asyncio.gather parallel chains.
-
-        Args:
-            tool_name: Target tool name.
-            **kwargs: Tool call arguments.
-
-        Returns:
-            Execution result dictionary.
-        """
+        """Async entry point for executing tools inside asyncio.gather parallel chains."""
         return await self.dispatcher.dispatch_tool_call(tool_name, kwargs)
 
     def __getattr__(self, name: str) -> Any:
@@ -373,6 +413,7 @@ class DataPlaneSandboxRunner:
         code_snippet: str,
         repl_state: dict[str, Any] | None = None,
         tool_bindings: dict[str, Any] | None = None,
+        user_context: DataPlaneUserContext | None = None,
     ) -> dict[str, Any]:
         """Runs a CodeMode Python script payload within the sandboxed Monty REPL.
 
@@ -380,6 +421,7 @@ class DataPlaneSandboxRunner:
             code_snippet: The Python script code to execute.
             repl_state: Existing REPL state dictionary from previous turn.
             tool_bindings: Dictionary mapping tool names to callable functions/stubs.
+            user_context: Propagated DataPlaneUserContext for identity/scope validation.
 
         Returns:
             Dictionary containing execution result, updated REPL state, and latency metrics.
@@ -391,12 +433,27 @@ class DataPlaneSandboxRunner:
         )
 
         current_repl_state = dict(repl_state) if repl_state else {}
+
+        # Validate Identity & Permission Scopes
+        if user_context and user_context.scopes:
+            if "read_only" in user_context.scopes and "tools:execute" not in user_context.scopes:
+                return {
+                    "status": "error",
+                    "error": (
+                        "Unauthorized: User context lacks required "
+                        "'tools:execute' permission scope."
+                    ),
+                    "updated_repl_state": current_repl_state,
+                    "execution_time_ms": round((time.time() - start_time) * 1000.0, 2),
+                }
+
         tools = tool_bindings or {}
 
         exec_globals = {
             "asyncio": asyncio,
             "arm_tools": arm_tools,
             "__builtins__": __builtins__,
+            "__user_context__": user_context,
             **tools,
             **current_repl_state,
         }
@@ -405,8 +462,17 @@ class DataPlaneSandboxRunner:
         try:
             async with asyncio.timeout(self.timeout_seconds):
                 indented_code = "\n".join(f"    {line}" for line in code_snippet.splitlines())
+                valid_global_keys = [
+                    k
+                    for k in current_repl_state.keys()
+                    if k.isidentifier() and not k.startswith("__")
+                ]
+                global_decls = (
+                    f"    global {', '.join(valid_global_keys)}\n" if valid_global_keys else ""
+                )
                 wrapped_code = (
                     "async def __code_mode_entry__():\n"
+                    f"{global_decls}"
                     f"{indented_code}\n"
                     "    return {k: v for k, v in locals().items() if not k.startswith('__')}\n"
                 )
@@ -414,6 +480,10 @@ class DataPlaneSandboxRunner:
                 exec(wrapped_code, exec_globals, exec_locals)
                 entry_fn = exec_locals["__code_mode_entry__"]
                 res = await entry_fn()
+
+                for k in current_repl_state:
+                    if k in exec_globals:
+                        current_repl_state[k] = exec_globals[k]
 
                 if isinstance(res, dict):
                     for k, v in res.items():
@@ -467,3 +537,13 @@ class DataPlaneSandboxRunner:
                 "updated_repl_state": current_repl_state,
                 "execution_time_ms": round((time.time() - start_time) * 1000.0, 2),
             }
+
+
+__all__ = [
+    "BaseToolDispatcher",
+    "LocalToolDispatcher",
+    "ArmToolsSDKBridge",
+    "DataPlaneSandboxRunner",
+    "arm_tools",
+    "TOOLS_DIR",
+]

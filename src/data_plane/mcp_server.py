@@ -1,18 +1,24 @@
 """Standalone FastMCP Server & JSON-RPC 2.0 Data Plane Endpoint.
 
 Exposes `/api/v1/mcp` HTTP/2 JSON-RPC endpoint with isolated zero-trust identity propagation,
-MCP 2026-07-28 header negotiation, and LocalToolDispatcher tool execution routing.
+MCP 2026-07-28 header negotiation, and explicit FastAPI Dependency Injection tool routing.
 """
 
 import json
 import logging
-from contextvars import ContextVar
 from typing import Any
 
-from fastapi import FastAPI, Request, Response, status
+from fastapi import Depends, FastAPI, Request, Response, status
 from fastapi.responses import JSONResponse
 from fastmcp import FastMCP
 
+from src.data_plane.context import get_current_user_context, user_context_var
+from src.data_plane.dependencies import (
+    data_plane_lifespan,
+    get_sandbox_runner,
+    get_tool_dispatcher,
+    get_user_context,
+)
 from src.data_plane.schemas import (
     DataPlaneJSONRPCError,
     DataPlaneJSONRPCRequest,
@@ -20,40 +26,26 @@ from src.data_plane.schemas import (
     DataPlaneUserContext,
     ServerDiscoverResult,
 )
-from src.data_plane.worker import LocalToolDispatcher
+from src.data_plane.worker import BaseToolDispatcher, DataPlaneSandboxRunner
 
 logger = logging.getLogger("mvcp.data_plane_mcp_server")
 
-# Task-isolated context variable for downstream identity propagation
-user_context_var: ContextVar[DataPlaneUserContext | None] = ContextVar(
-    "user_context_var", default=None
-)
-
-
-def get_current_user_context() -> DataPlaneUserContext | None:
-    """Returns the DataPlaneUserContext for the active task execution context."""
-    return user_context_var.get()
-
-
 # FastMCP instance serves as the registration handle for FastMCP decorators and SDK
-# bridging in Phase 2.2, while the /api/v1/mcp endpoint directly delegates tool
-# execution requests to the module-level LocalToolDispatcher singleton.
+# bridging in Phase 2.2.
 mcp = FastMCP("data-plane-mcp")
 
-# Module-level LocalToolDispatcher singleton to avoid catalog reloading overhead per request
-dispatcher = LocalToolDispatcher()
-
-# Initialize ASGI FastAPI Application
+# Initialize ASGI FastAPI Application with data_plane_lifespan
 app = FastAPI(
     title="Data Plane FastMCP Server",
     description="gVisor Sandboxed FastMCP Execution Engine",
     version="0.1.0",
+    lifespan=data_plane_lifespan,
 )
 
 
 @app.middleware("http")
 async def extract_identity_context_middleware(request: Request, call_next: Any) -> Response:
-    """Middleware extracting downstream identity headers into a task-isolated ContextVar.
+    """Middleware extracting downstream identity headers into task-isolated user_context_var.
 
     Enforces zero-trust upstream authentication by verifying the presence of X-User-ID.
     Uses a try...finally block with token.reset() to prevent cross-request context bleeding.
@@ -87,14 +79,19 @@ async def extract_identity_context_middleware(request: Request, call_next: Any) 
 
 
 @app.post("/api/v1/mcp", response_model=DataPlaneJSONRPCResponse)
-async def handle_mcp_jsonrpc_endpoint(request: Request) -> JSONResponse:
+async def handle_mcp_jsonrpc_endpoint(
+    request: Request,
+    dispatcher: BaseToolDispatcher = Depends(get_tool_dispatcher),
+    sandbox_runner: DataPlaneSandboxRunner = Depends(get_sandbox_runner),
+    user_context: DataPlaneUserContext | None = Depends(get_user_context),
+) -> JSONResponse:
     """Handles incoming JSON-RPC 2.0 MCP requests over HTTP/2.
 
     Supported methods:
     - 'server/discover': Stateless MCP 2026-07-28 capabilities and version discovery.
     - 'initialize': Legacy fallback for MCP discovery.
-    - 'tools/list': Returns catalog of available tools.
-    - 'tools/call': Executes tool via LocalToolDispatcher.
+    - 'tools/list': Returns catalog of available tools via injected dispatcher.
+    - 'tools/call': Executes tool via injected dispatcher and user_context.
     """
     try:
         raw_body = await request.body()
@@ -175,7 +172,7 @@ async def handle_mcp_jsonrpc_endpoint(request: Request) -> JSONResponse:
             )
 
         elif rpc_request.method == "tools/list":
-            tools_list = await dispatcher._read_catalog()
+            tools_list = await dispatcher.read_catalog()
             return JSONResponse(
                 status_code=status.HTTP_200_OK,
                 content=DataPlaneJSONRPCResponse(
@@ -201,9 +198,11 @@ async def handle_mcp_jsonrpc_endpoint(request: Request) -> JSONResponse:
                     ).model_dump(exclude_none=True),
                 )
 
-            dispatch_res = await dispatcher.dispatch_tool_call(tool_name, arguments)
+            dispatch_res = await dispatcher.dispatch_tool_call(
+                tool_name, arguments, user_context=user_context
+            )
 
-            # Check if LocalToolDispatcher returned an internal error structure
+            # Check if dispatcher returned an internal error structure
             if isinstance(dispatch_res, dict) and "error" in dispatch_res:
                 err_dict = dispatch_res["error"]
                 return JSONResponse(
@@ -270,7 +269,6 @@ async def handle_mcp_jsonrpc_endpoint(request: Request) -> JSONResponse:
 __all__ = [
     "app",
     "mcp",
-    "dispatcher",
     "user_context_var",
     "get_current_user_context",
 ]
