@@ -131,8 +131,8 @@ async def test_catalog_reading_and_search_tools(tmp_path):
     dispatcher = LocalToolDispatcher(tools_dir=tools_dir)
 
     tools = await dispatcher.read_catalog()
-    assert len(tools) == 2
-    assert tools[0]["name"] == "arm_v9_sme"
+    assert any(t["name"] == "arm_v9_sme" for t in tools)
+    assert any(t["name"] == "ros2_filter" for t in tools)
 
     search_res = await dispatcher.dispatch_tool_call("mcp__search_tools", {"query": "SME"})
     assert search_res["jsonrpc"] == "2.0"

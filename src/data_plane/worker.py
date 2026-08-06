@@ -11,9 +11,10 @@ import logging
 import os
 import sys
 import time
+from pathlib import Path
 from typing import Any, Protocol
 
-from src.config import settings
+from src.config import resolve_tools_dir, settings
 from src.data_plane.engines.monty_engine import MontyEngine
 from src.data_plane.schemas import DataPlaneUserContext
 
@@ -56,13 +57,15 @@ class LocalToolDispatcher:
 
     def __init__(
         self,
-        tools_dir: str = TOOLS_DIR,
+        tools_dir: str | Path | None = None,
         timeout_seconds: float | None = None,
         sandbox_runner: Any | None = None,
     ):
-        self.tools_dir = tools_dir
+        self.tools_dir = str(resolve_tools_dir(tools_dir))
         self.timeout_seconds = timeout_seconds if timeout_seconds is not None else DEFAULT_TIMEOUT
         self._sandbox_runner = sandbox_runner
+        self._last_mtime: float = 0.0
+        self._cached_catalog: list[dict[str, Any]] | None = None
 
     @property
     def sandbox_runner(self) -> "DataPlaneSandboxRunner":
@@ -78,17 +81,8 @@ class LocalToolDispatcher:
             "read_catalog": self.read_catalog,
         }
 
-    async def read_catalog(self) -> list[dict[str, Any]]:
-        """Reads available tool entries from catalog.json or returns default tool catalog."""
-        catalog_path = os.path.join(self.tools_dir, "catalog.json")
-        if os.path.exists(catalog_path):
-            try:
-                with open(catalog_path, encoding="utf-8") as f:
-                    catalog_data = json.load(f)
-                    return catalog_data.get("tools", [])  # type: ignore[no-any-return]
-            except Exception as e:
-                logger.error(f"[Data Plane Worker] Failed to read catalog.json: {e}")
-
+    def _get_default_catalog(self) -> list[dict[str, Any]]:
+        """Returns default built-in tools list."""
         catalog = [
             {
                 "name": "repl_execute",
@@ -181,6 +175,50 @@ class LocalToolDispatcher:
 
         return catalog
 
+    async def read_catalog(self) -> list[dict[str, Any]]:
+        """Reads available tool entries from catalog.json or returns default tool catalog."""
+        default_tools = self._get_default_catalog()
+        catalog_path = Path(self.tools_dir) / "catalog.json"
+
+        if catalog_path.exists():
+            try:
+                current_mtime = catalog_path.stat().st_mtime
+                if current_mtime > self._last_mtime or self._cached_catalog is None:
+                    with open(catalog_path, encoding="utf-8") as f:
+                        catalog_data = json.load(f)
+                        if isinstance(catalog_data, dict):
+                            dynamic_tools = catalog_data.get("tools", [])
+                        elif isinstance(catalog_data, list):
+                            dynamic_tools = catalog_data
+                        else:
+                            dynamic_tools = []
+
+                    self._cached_catalog = dynamic_tools
+                    self._last_mtime = current_mtime
+                    logger.info(
+                        f"[Data Plane Worker] Catalog hot-reloaded from {catalog_path} "
+                        f"(mtime={current_mtime})"
+                    )
+            except Exception as e:
+                logger.error(
+                    f"[Data Plane Worker] Failed to read/parse catalog.json at {catalog_path}: "
+                    f"{e}. Retaining cached catalog."
+                )
+
+        dynamic_tools = self._cached_catalog or []
+
+        # Merge built-in tools + dynamic catalog.json tools
+        merged_tools = list(default_tools)
+        for d_tool in dynamic_tools:
+            d_name = d_tool.get("name")
+            idx = next((i for i, t in enumerate(merged_tools) if t.get("name") == d_name), None)
+            if idx is not None:
+                merged_tools[idx] = d_tool
+            else:
+                merged_tools.append(d_tool)
+
+        return merged_tools
+
     async def dispatch_tool_call(
         self,
         tool_name: str,
@@ -203,6 +241,53 @@ class LocalToolDispatcher:
             f"[Data Plane Worker] Dispatching tool [{tool_name}] with args: {args} "
             f"(user={user_context.user_id if user_context else 'anonymous'})"
         )
+
+        catalog_tools = await self.read_catalog()
+        tool_entry = next((t for t in catalog_tools if t.get("name") == tool_name), None)
+
+        if tool_entry and tool_entry.get("entrypoint"):
+            entrypoint = tool_entry["entrypoint"]
+            tools_dir_abs = os.path.abspath(self.tools_dir)
+            target_path = os.path.abspath(os.path.join(self.tools_dir, entrypoint))
+
+            # Path Canonicalization Security Check
+            if (
+                not target_path.startswith(f"{tools_dir_abs}{os.sep}")
+                and target_path != tools_dir_abs
+            ):
+                logger.warning(
+                    f"[Data Plane Worker] Path traversal blocked for entrypoint: {entrypoint}"
+                )
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32601,
+                        "message": (
+                            f"Tool '{tool_name}' entrypoint attempts invalid path traversal "
+                            "outside tools_dir."
+                        ),
+                    },
+                }
+
+            if target_path.endswith(".py") and os.path.exists(target_path):
+                return await self._execute_python_script_subprocess(
+                    tool_name, target_path, args, start_time
+                )
+            elif os.path.exists(target_path) and os.access(target_path, os.X_OK):
+                return await self._execute_binary_subprocess(
+                    tool_name, target_path, args, start_time
+                )
+            else:
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32601,
+                        "message": (
+                            f"Tool '{tool_name}' entrypoint '{entrypoint}' is missing or "
+                            f"non-executable in {self.tools_dir}."
+                        ),
+                    },
+                }
 
         if tool_name == "repl_execute":
             code_snippet = args.get("code") or args.get("code_snippet") or ""
@@ -326,6 +411,78 @@ class LocalToolDispatcher:
                         f"Tool '{tool_name}' not found or "
                         f"executable binary missing in {self.tools_dir}."
                     ),
+                },
+            }
+
+    async def _execute_python_script_subprocess(
+        self,
+        tool_name: str,
+        script_path: str,
+        args: dict[str, Any],
+        start_time: float,
+    ) -> dict[str, Any]:
+        """Executes a Python script entrypoint via asyncio subprocess running sys.executable."""
+        try:
+            json_args = json.dumps(args)
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable,
+                script_path,
+                "--json-args",
+                json_args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=self.timeout_seconds
+                )
+            except TimeoutError:
+                try:
+                    proc.kill()
+                    await proc.wait()
+                except Exception as kill_err:
+                    logger.error(
+                        f"[Data Plane Worker] Failed to kill process {proc.pid}: {kill_err}"
+                    )
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32603,
+                        "message": "Execution timed out: Sandbox process exceeded time limit.",
+                    },
+                }
+
+            duration_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
+            raw_output = stdout.decode("utf-8").strip()
+
+            try:
+                parsed_json = json.loads(raw_output)
+            except Exception:
+                parsed_json = {"raw_output": raw_output}
+
+            return {
+                "jsonrpc": "2.0",
+                "result": {
+                    "tool_name": tool_name,
+                    "status": "SUCCESS" if proc.returncode == 0 else "ERROR",
+                    "execution_time_ms": duration_ms,
+                    "exit_code": proc.returncode,
+                    "output": parsed_json,
+                    "result": parsed_json,
+                    "stderr": stderr.decode("utf-8").strip(),
+                },
+            }
+
+        except Exception as e:
+            logger.error(
+                f"[Data Plane Worker] Exception executing python script "
+                f"subprocess [{script_path}]: {e}"
+            )
+            return {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32603,
+                    "message": f"Subprocess execution error for '{tool_name}': {e}",
                 },
             }
 
