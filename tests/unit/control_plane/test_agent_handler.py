@@ -1,11 +1,12 @@
-"""Unit tests for Control Plane AgentHandlerService and ArmPlatformDeps."""
+"""Unit tests for Control Plane AgentHandlerService, stub generator, and ArmPlatformDeps."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
 
+from src.config import Settings
 from src.control_plane.dependencies import (
     ArmPlatformDeps,
     UserContext,
@@ -14,6 +15,10 @@ from src.control_plane.dependencies import (
 )
 from src.control_plane.services.agent_handler import AgentHandlerService
 from src.control_plane.services.mcp_proxy import MCPProxyService
+from src.control_plane.utils.stub_generator import (
+    generate_catalog_stubs,
+    generate_python_stub,
+)
 
 
 @pytest.mark.unit
@@ -62,7 +67,6 @@ async def test_agent_handler_run_agent_tool_invocation():
     user_ctx = UserContext(user_id="usr_agent_002", role="admin", scopes=["all"])
     deps = ArmPlatformDeps(mcp_proxy=mock_proxy, user_context=user_ctx)
 
-    # Use TestModel from pydantic-ai for deterministic offline testing
     test_model = TestModel()
     service = AgentHandlerService(model=test_model)
 
@@ -71,6 +75,38 @@ async def test_agent_handler_run_agent_tool_invocation():
     assert res is not None
     assert res.output is not None
     mock_proxy.call_tool.assert_called_once()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_agent_handler_code_mode_enabled_registers_run_code():
+    """Verify agent registers run_code tool when ENABLE_CODE_MODE=True."""
+    mock_settings = Settings(ENABLE_CODE_MODE=True)
+
+    with patch(
+        "src.control_plane.services.agent_handler.get_settings",
+        return_value=mock_settings,
+    ):
+        service = AgentHandlerService(model=TestModel())
+        tool_names = list(service.agent._function_toolset.tools.keys())
+        assert "run_code" in tool_names
+        assert "execute_code_mode_tool" not in tool_names
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_agent_handler_code_mode_disabled_registers_multi_turn():
+    """Verify agent registers execute_code_mode_tool when ENABLE_CODE_MODE=False."""
+    mock_settings = Settings(ENABLE_CODE_MODE=False)
+
+    with patch(
+        "src.control_plane.services.agent_handler.get_settings",
+        return_value=mock_settings,
+    ):
+        service = AgentHandlerService(model=TestModel())
+        tool_names = list(service.agent._function_toolset.tools.keys())
+        assert "execute_code_mode_tool" in tool_names
+        assert "run_code" not in tool_names
 
 
 @pytest.mark.unit
@@ -90,6 +126,46 @@ async def test_agent_handler_custom_agent_injection():
 
     assert res == "Mocked Agent Run Output"
     mock_agent.run.assert_called_once_with("Custom prompt", deps=deps)
+
+
+@pytest.mark.unit
+def test_stub_generator_single_tool():
+    """Verify generate_python_stub builds correct async function signature."""
+    stub = generate_python_stub(
+        tool_name="compile_kernel",
+        description="Compiles Arm C/C++ kernel source.",
+        input_schema={
+            "properties": {
+                "source": {"type": "string"},
+                "opt_level": {"type": "integer"},
+            },
+            "required": ["source"],
+        },
+    )
+
+    assert "async def compile_kernel(source: str, opt_level: int = None)" in stub
+    assert '"""Compiles Arm C/C++ kernel source."""' in stub
+
+
+@pytest.mark.unit
+def test_stub_generator_catalog():
+    """Verify generate_catalog_stubs generates combined stub string for multiple tools."""
+    catalog = [
+        {
+            "name": "tool_a",
+            "description": "Tool A",
+            "inputSchema": {"properties": {"arg_a": {"type": "string"}}},
+        },
+        {
+            "name": "tool_b",
+            "description": "Tool B",
+            "inputSchema": {"properties": {"arg_b": {"type": "integer"}}},
+        },
+    ]
+
+    stubs = generate_catalog_stubs(catalog)
+    assert "async def tool_a(arg_a: str = None)" in stubs
+    assert "async def tool_b(arg_b: int = None)" in stubs
 
 
 @pytest.mark.unit
