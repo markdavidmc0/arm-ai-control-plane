@@ -13,12 +13,16 @@ import sys
 import time
 from typing import Any, Protocol
 
+from src.config import settings
+from src.data_plane.engines.monty_engine import MontyEngine
 from src.data_plane.schemas import DataPlaneUserContext
 
 logger = logging.getLogger("mvcp.data_plane_worker")
 
 TOOLS_DIR = os.environ.get("ARM_TOOLS_DIR", "/opt/arm-tools")
 DEFAULT_TIMEOUT = float(os.environ.get("SANDBOX_TIMEOUT_SECONDS", "5.0"))
+
+monty_engine_singleton = MontyEngine(max_instructions=settings.MONTY_MAX_INSTRUCTIONS)
 
 
 class BaseToolDispatcher(Protocol):
@@ -67,6 +71,13 @@ class LocalToolDispatcher:
             self._sandbox_runner = DataPlaneSandboxRunner(timeout_seconds=self.timeout_seconds)
         return self._sandbox_runner
 
+    def get_external_functions(self) -> dict[str, Any]:
+        """Returns host callback handlers for sandboxed execution engines."""
+        return {
+            "dispatch_tool_call": self.dispatch_tool_call,
+            "read_catalog": self.read_catalog,
+        }
+
     async def read_catalog(self) -> list[dict[str, Any]]:
         """Reads available tool entries from catalog.json or returns default tool catalog."""
         catalog_path = os.path.join(self.tools_dir, "catalog.json")
@@ -78,7 +89,7 @@ class LocalToolDispatcher:
             except Exception as e:
                 logger.error(f"[Data Plane Worker] Failed to read catalog.json: {e}")
 
-        return [
+        catalog = [
             {
                 "name": "repl_execute",
                 "description": (
@@ -148,6 +159,28 @@ class LocalToolDispatcher:
             },
         ]
 
+        if settings.ENABLE_CODE_MODE:
+            catalog.append({
+                "name": "execute_code",
+                "description": "Executes sandboxed Python code within the SFI MontyEngine.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "code": {
+                            "type": "string",
+                            "description": "Python code snippet to execute.",
+                        },
+                        "inputs": {
+                            "type": "object",
+                            "description": "Optional input variable bindings mapping.",
+                        },
+                    },
+                    "required": ["code"],
+                },
+            })
+
+        return catalog
+
     async def dispatch_tool_call(
         self,
         tool_name: str,
@@ -208,6 +241,56 @@ class LocalToolDispatcher:
                     "result": output_val,
                     "content": content_list,
                     "updated_repl_state": res.get("updated_repl_state", {}),
+                },
+            }
+
+        if tool_name == "execute_code":
+            if not settings.ENABLE_CODE_MODE:
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32601,
+                        "message": "Tool 'execute_code' is disabled via configuration.",
+                    },
+                }
+            code_snippet = args.get("code") or args.get("code_snippet") or ""
+            inputs = args.get("inputs") or {}
+            exec_res = await monty_engine_singleton.execute_snippet(
+                code=code_snippet,
+                inputs=inputs,
+                external_functions=self.get_external_functions(),
+            )
+            duration_ms = exec_res.get("duration_ms", 0.0)
+
+            if not exec_res.get("success"):
+                err_data = exec_res.get("error") or {}
+                err_msg = err_data.get("message", "SFI code execution failed.")
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32603,
+                        "message": err_msg,
+                    },
+                }
+
+            out_val = exec_res.get("result")
+            stdout_str = exec_res.get("stdout", "")
+            content_list = []
+            if stdout_str:
+                content_list.append({"type": "text", "text": stdout_str})
+            if out_val is not None:
+                content_list.append({"type": "text", "text": str(out_val)})
+
+            return {
+                "jsonrpc": "2.0",
+                "result": {
+                    "tool_name": "execute_code",
+                    "status": "SUCCESS",
+                    "execution_time_ms": duration_ms,
+                    "output": out_val,
+                    "result": out_val,
+                    "stdout": stdout_str,
+                    "content": content_list,
                 },
             }
 

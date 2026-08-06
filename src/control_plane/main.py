@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.control_plane.routers.llm_proxy import router as llm_proxy_router
+from src.control_plane.routers.tool_registration import router as tool_registration_router
 from src.control_plane.schemas import HealthStatusResponse
 
 # Initialize logging
@@ -27,6 +28,7 @@ app.add_middleware(
 
 # Register Active Control Plane Routers
 app.include_router(llm_proxy_router)
+app.include_router(tool_registration_router)
 
 
 @app.get("/api/v1/health", response_model=HealthStatusResponse)

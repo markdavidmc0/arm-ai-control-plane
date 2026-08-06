@@ -10,6 +10,7 @@ __all__ = [
     "MCPJsonRPCRequest",
     "MCPJsonRPCResponse",
     "HealthStatusResponse",
+    "ToolRegistrationSchema",
 ]
 
 
@@ -54,6 +55,22 @@ class HealthStatusResponse(BaseModel):
     identity_layer: str = Field(
         "keycloak_wif", description="Identity and OIDC Workload Identity Federation provider"
     )
+
+
+class ToolRegistrationSchema(BaseModel):
+    """Pydantic schema for tool registration requests."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str = Field(..., description="Unique tool identifier name")
+    description: str = Field(..., description="Tool capability description")
+    parameters: dict[str, Any] = Field(
+        default_factory=dict, description="Tool parameters input schema"
+    )
+    entrypoint: str | None = Field(
+        None, description="Optional execution binary or script entrypoint"
+    )
+
 
 class UserContext(BaseModel):
     """User context container parsed from pre-authenticated Envoy HTTP headers."""
