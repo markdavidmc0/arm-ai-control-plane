@@ -1,21 +1,40 @@
-"""Global configuration settings for Data Plane and Code Mode."""
+"""Unified Operational Configuration for Control Plane and Data Plane."""
 
 import os
+from functools import lru_cache
 from pathlib import Path
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Data Plane and Code Mode configuration settings."""
+    """Platform-wide operational settings loaded from environment variables."""
 
-    model_config = SettingsConfigDict(env_prefix="WORKSPACE_")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
-    ENABLE_CODE_MODE: bool = True
+    # Feature Flags & Engine Limits
+    ENABLE_CODE_MODE: bool = False
     MONTY_MAX_INSTRUCTIONS: int = 1_000_000
 
+    # Networking & Service Resolution
+    DATA_PLANE_URL: str = Field(
+        default="http://mcp-tool-server-service.data-plane.svc.cluster.local:8000",
+        validation_alias=AliasChoices("DATA_PLANE_URL", "DATA_PLANE_MCP_URL"),
+    )
 
-settings = Settings()
+
+@lru_cache
+def get_settings() -> Settings:
+    """Returns cached global Settings instance."""
+    return Settings()
+
+
+settings = get_settings()
 
 
 def resolve_tools_dir(explicit_path: str | Path | None = None) -> Path:
@@ -28,6 +47,6 @@ def resolve_tools_dir(explicit_path: str | Path | None = None) -> Path:
     """
     if explicit_path is not None:
         return Path(explicit_path)
-    if "ARM_TOOLS_DIR" in os.environ and os.environ["ARM_TOOLS_DIR"]:
+    if os.getenv("ARM_TOOLS_DIR"):
         return Path(os.environ["ARM_TOOLS_DIR"])
     return Path.cwd() / "configs"

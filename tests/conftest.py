@@ -9,9 +9,22 @@ import litellm
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
-from src.control_plane.dependencies import get_llm_client
-from src.control_plane.main import app as fastapi_app
+from src.config import get_settings
+from src.control_plane.dependencies import get_data_plane_client, get_llm_client
+from src.control_plane.main import app as control_plane_app
+from src.data_plane.mcp_server import app as data_plane_app
+
+
+@pytest.fixture(autouse=True)
+def clear_settings_cache():
+    """Ensures Pydantic settings cache is cleared before and after each test."""
+    if hasattr(get_settings, "cache_clear"):
+        get_settings.cache_clear()
+    yield
+    if hasattr(get_settings, "cache_clear"):
+        get_settings.cache_clear()
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -40,6 +53,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 # --- CLI Option Fixtures ---
 
+
 @pytest.fixture(scope="session")
 def target_env(request: pytest.FixtureRequest) -> str:
     """Returns the target environment CLI flag value."""
@@ -54,10 +68,11 @@ def gateway_endpoint(request: pytest.FixtureRequest) -> str | None:
 
 # --- FastAPI Application & Client Fixtures ---
 
+
 @pytest.fixture
 def app() -> FastAPI:
     """Provides the FastAPI app instance for testing and dependency overrides."""
-    return fastapi_app
+    return control_plane_app
 
 
 @pytest.fixture
@@ -68,6 +83,7 @@ def test_client(app: FastAPI) -> Generator[TestClient, None, None]:
 
 
 # --- Global Mocks & Environment Isolation ---
+
 
 class MockLLMClient:
     """Test double providing deterministic completion responses for offline execution."""
@@ -144,3 +160,19 @@ def mock_dispatcher() -> AsyncMock:
         "output": "Mock tool output",
     }
     return dispatcher
+
+
+@pytest.fixture(autouse=True)
+def mock_data_plane_client_override():
+    """Proxies Control Plane HTTP requests to Data Plane FastAPI app in-memory."""
+
+    async def _get_in_memory_data_plane_client():
+        async with AsyncClient(
+            transport=ASGITransport(app=data_plane_app),
+            base_url="http://dataplane.test",
+        ) as client:
+            yield client
+
+    control_plane_app.dependency_overrides[get_data_plane_client] = _get_in_memory_data_plane_client
+    yield
+    control_plane_app.dependency_overrides.pop(get_data_plane_client, None)

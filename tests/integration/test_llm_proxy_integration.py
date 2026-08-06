@@ -47,9 +47,7 @@ def test_llm_proxy_success_flow(test_client, mock_llm_di):
     """Verifies valid request returns expected LLM response and telemetry headers."""
     payload = {
         "model": "openai/gpt-4o",
-        "messages": [
-            {"role": "user", "content": "Test prompt for integration test"}
-        ],
+        "messages": [{"role": "user", "content": "Test prompt for integration test"}],
         "temperature": 0.7,
     }
 
@@ -60,17 +58,12 @@ def test_llm_proxy_success_flow(test_client, mock_llm_di):
         "Content-Type": "application/json",
     }
 
-    response = test_client.post(
-        "/v1/chat/completions", json=payload, headers=headers
-    )
+    response = test_client.post("/v1/chat/completions", json=payload, headers=headers)
 
     assert response.status_code == 200
 
     body = response.json()
-    assert (
-        body["choices"][0]["message"]["content"]
-        == "MVCP Integration Test Response"
-    )
+    assert body["choices"][0]["message"]["content"] == "MVCP Integration Test Response"
 
     # Telemetry header assertions
     assert "X-LLM-Cost-USD" in response.headers

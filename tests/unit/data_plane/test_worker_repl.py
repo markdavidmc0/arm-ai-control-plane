@@ -40,9 +40,7 @@ async def test_repl_code_execution_stdout_safety():
     )
 
     code = "print('hello world')\nresult = 1 + 1"
-    res = await dispatcher.dispatch_tool_call(
-        "repl_execute", {"code": code}, user_context=user_ctx
-    )
+    res = await dispatcher.dispatch_tool_call("repl_execute", {"code": code}, user_context=user_ctx)
 
     assert res["jsonrpc"] == "2.0"
     assert "result" in res
@@ -91,9 +89,7 @@ async def test_repl_infinite_loop_timeout():
     runner = DataPlaneSandboxRunner(timeout_seconds=0.1)
     dispatcher = LocalToolDispatcher(sandbox_runner=runner, timeout_seconds=0.1)
 
-    res = await dispatcher.dispatch_tool_call(
-        "repl_execute", {"code": "while True:\n    pass"}
-    )
+    res = await dispatcher.dispatch_tool_call("repl_execute", {"code": "while True:\n    pass"})
 
     assert res["jsonrpc"] == "2.0"
     assert "error" in res

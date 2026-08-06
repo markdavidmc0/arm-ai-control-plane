@@ -16,9 +16,7 @@ async def test_llm_router_service_route_completion(monkeypatch):
             **{
                 "id": "chatcmpl-test",
                 "model": "claude-3-5-sonnet",
-                "choices": [
-                    {"message": {"role": "assistant", "content": "Hello human"}}
-                ],
+                "choices": [{"message": {"role": "assistant", "content": "Hello human"}}],
                 "usage": {"prompt_tokens": 12, "completion_tokens": 8},
             }
         )
@@ -111,9 +109,7 @@ async def test_llm_router_vertex_ai_configuration(monkeypatch):
             **{
                 "id": "gemini-test-1",
                 "model": kwargs.get("model"),
-                "choices": [
-                    {"message": {"role": "assistant", "content": "Gemini response"}}
-                ],
+                "choices": [{"message": {"role": "assistant", "content": "Gemini response"}}],
                 "usage": {"prompt_tokens": 10, "completion_tokens": 20},
             }
         )

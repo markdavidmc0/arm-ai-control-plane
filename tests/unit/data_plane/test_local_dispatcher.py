@@ -6,9 +6,11 @@ catalog discovery, and search_tools meta-tool functionality.
 """
 
 import json
+from unittest.mock import patch
 
 import pytest
 
+from src.config import Settings
 from src.data_plane.schemas import DataPlaneUserContext
 from src.data_plane.worker import LocalToolDispatcher
 
@@ -139,3 +141,31 @@ async def test_catalog_reading_and_search_tools(tmp_path):
     assert search_res["result"]["status"] == "SUCCESS"
     assert len(search_res["result"]["matches"]) == 1
     assert search_res["result"]["matches"][0]["name"] == "arm_v9_sme"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_default_catalog_code_mode_enabled(monkeypatch):
+    """Verifies _get_default_catalog includes repl_execute and excludes execute_code."""
+    monkeypatch.setenv("ENABLE_CODE_MODE", "true")
+
+    dispatcher = LocalToolDispatcher()
+    catalog = dispatcher._get_default_catalog()
+    tool_names = [t["name"] for t in catalog]
+
+    assert "repl_execute" in tool_names
+    assert "execute_code" not in tool_names
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_default_catalog_code_mode_disabled():
+    """Verifies _get_default_catalog includes execute_code and excludes repl_execute."""
+    mock_settings = Settings(ENABLE_CODE_MODE=False)
+    dispatcher = LocalToolDispatcher()
+
+    with patch("src.data_plane.worker.settings", mock_settings):
+        catalog = dispatcher._get_default_catalog()
+        tool_names = [t["name"] for t in catalog]
+        assert "execute_code" in tool_names
+        assert "repl_execute" not in tool_names

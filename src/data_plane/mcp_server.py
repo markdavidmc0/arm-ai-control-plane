@@ -20,6 +20,7 @@ from src.data_plane.dependencies import (
     get_user_context,
 )
 from src.data_plane.schemas import (
+    DataPlaneHealthResponse,
     DataPlaneJSONRPCError,
     DataPlaneJSONRPCRequest,
     DataPlaneJSONRPCResponse,
@@ -43,6 +44,17 @@ app = FastAPI(
 )
 
 
+@app.get("/health", response_model=DataPlaneHealthResponse)
+@app.get("/api/v1/health", response_model=DataPlaneHealthResponse)
+async def data_plane_health_check() -> DataPlaneHealthResponse:
+    """Returns the Data Plane sandboxed execution engine readiness state."""
+    return DataPlaneHealthResponse(
+        status="healthy",
+        service="data-plane",
+        engine="gvisor_monty",
+    )
+
+
 @app.middleware("http")
 async def extract_identity_context_middleware(request: Request, call_next: Any) -> Response:
     """Middleware extracting downstream identity headers into task-isolated user_context_var.
@@ -50,6 +62,10 @@ async def extract_identity_context_middleware(request: Request, call_next: Any) 
     Enforces zero-trust upstream authentication by verifying the presence of X-User-ID.
     Uses a try...finally block with token.reset() to prevent cross-request context bleeding.
     """
+    # Bypass identity header checks for health readiness probes
+    if request.url.path in ("/health", "/api/v1/health"):
+        return await call_next(request)
+
     user_id = request.headers.get("X-User-ID")
 
     if not user_id:

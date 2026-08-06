@@ -1,5 +1,10 @@
 # API Key Storage for Local Development
-src/control_plane/data/keys.json
+config/*.json
+!config/*.json.example
+
+# Root-level keys (if created at root)
+keys.json
+!keys.json.example
 
 # Local Python Environment & Caches
 __pycache__/

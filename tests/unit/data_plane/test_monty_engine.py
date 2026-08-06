@@ -87,17 +87,12 @@ async def test_monty_engine_syntax_error_handling():
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_config_toggle_disable():
-    """Mocks ENABLE_CODE_MODE=False and verifies execute_code is excluded from catalog."""
+    """Mocks ENABLE_CODE_MODE=False and verifies repl_execute is excluded."""
     mock_settings = Settings(ENABLE_CODE_MODE=False)
     dispatcher = LocalToolDispatcher()
 
     with patch("src.data_plane.worker.settings", mock_settings):
         catalog = await dispatcher.read_catalog()
         tool_names = [t["name"] for t in catalog]
-        assert "execute_code" not in tool_names
-
-        res = await dispatcher.dispatch_tool_call("execute_code", {"code": "result = 1"})
-        assert res["jsonrpc"] == "2.0"
-        assert "error" in res
-        assert res["error"]["code"] == -32601
-        assert "disabled" in res["error"]["message"]
+        assert "repl_execute" not in tool_names
+        assert "execute_code" in tool_names

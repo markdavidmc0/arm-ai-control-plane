@@ -14,9 +14,13 @@ import time
 from pathlib import Path
 from typing import Any, Protocol
 
-from src.config import resolve_tools_dir, settings
+from src.config import get_settings, resolve_tools_dir, settings
 from src.data_plane.engines.monty_engine import MontyEngine
-from src.data_plane.schemas import DataPlaneUserContext
+from src.data_plane.schemas import (
+    EXECUTE_CODE_TOOL_SCHEMA,
+    REPL_EXECUTE_TOOL_SCHEMA,
+    DataPlaneUserContext,
+)
 
 logger = logging.getLogger("mvcp.data_plane_worker")
 
@@ -83,97 +87,13 @@ class LocalToolDispatcher:
 
     def _get_default_catalog(self) -> list[dict[str, Any]]:
         """Returns default built-in tools list."""
-        catalog = [
-            {
-                "name": "repl_execute",
-                "description": (
-                    "Executes CodeMode Python script payloads within the sandboxed REPL."
-                ),
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "code": {
-                            "type": "string",
-                            "description": "Python code snippet to execute.",
-                        },
-                        "repl_state": {
-                            "type": "object",
-                            "description": "Optional REPL state mapping from previous turns.",
-                        },
-                    },
-                    "required": ["code"],
-                },
-            },
-            {
-                "name": "optimize_kernel",
-                "description": (
-                    "Cross-compiles and optimizes kernel code within a sandboxed data plane."
-                ),
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "code": {
-                            "type": "string",
-                            "description": "The source code to be optimized.",
-                        }
-                    },
-                    "required": ["code"],
-                },
-            },
-            {
-                "name": "profile_and_optimize_kernel",
-                "description": (
-                    "Cross-compiles and benchmarks C++ matrix kernels in a remote gVisor sandbox."
-                ),
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "source_code": {
-                            "type": "string",
-                            "description": "The source code to be optimized.",
-                        }
-                    },
-                    "required": ["source_code"],
-                },
-            },
-            {
-                "name": "ros2_pointcloud_voxelizer_profile",
-                "description": (
-                    "Profiles ROS2 PointCloud2 Voxel Grid filter performance on Arm Neoverse N2."
-                ),
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "voxel_size": {
-                            "type": "number",
-                            "description": "Leaf size for voxel grid downsampling filter.",
-                        }
-                    },
-                },
-            },
-        ]
+        current_settings = get_settings()
 
-        if settings.ENABLE_CODE_MODE:
-            catalog.append({
-                "name": "execute_code",
-                "description": "Executes sandboxed Python code within the SFI MontyEngine.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "code": {
-                            "type": "string",
-                            "description": "Python code snippet to execute.",
-                        },
-                        "inputs": {
-                            "type": "object",
-                            "description": "Optional input variable bindings mapping.",
-                        },
-                    },
-                    "required": ["code"],
-                },
-            })
+        # Check ENABLE_CODE_MODE on fresh settings instance
+        if getattr(current_settings, "ENABLE_CODE_MODE", False):
+            return [REPL_EXECUTE_TOOL_SCHEMA]
 
-        return catalog
+        return [EXECUTE_CODE_TOOL_SCHEMA]
 
     async def read_catalog(self) -> list[dict[str, Any]]:
         """Reads available tool entries from catalog.json or returns default tool catalog."""
@@ -330,14 +250,6 @@ class LocalToolDispatcher:
             }
 
         if tool_name == "execute_code":
-            if not settings.ENABLE_CODE_MODE:
-                return {
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32601,
-                        "message": "Tool 'execute_code' is disabled via configuration.",
-                    },
-                }
             code_snippet = args.get("code") or args.get("code_snippet") or ""
             inputs = args.get("inputs") or {}
             exec_res = await monty_engine_singleton.execute_snippet(

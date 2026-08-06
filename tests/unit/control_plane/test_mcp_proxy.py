@@ -30,9 +30,7 @@ async def test_mcp_proxy_successful_call_tool():
     )
     service = MCPProxyService(client=client)
 
-    result = await service.call_tool(
-        name="optimize_kernel", arguments={"code": "void kernel() {}"}
-    )
+    result = await service.call_tool(name="optimize_kernel", arguments={"code": "void kernel() {}"})
 
     assert result["jsonrpc"] == "2.0"
     assert result["result"]["status"] == "SUCCESS"

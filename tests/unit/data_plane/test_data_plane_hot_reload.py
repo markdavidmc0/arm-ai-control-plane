@@ -7,7 +7,13 @@ from pathlib import Path
 
 import pytest
 
+from src.config import settings
 from src.data_plane.worker import LocalToolDispatcher
+
+# Determine the active base primitive expected in the environment
+EXPECTED_BASE_TOOL = (
+    "repl_execute" if getattr(settings, "ENABLE_CODE_MODE", False) else "execute_code"
+)
 
 
 @pytest.mark.asyncio
@@ -20,8 +26,8 @@ async def test_data_plane_cold_boot_safety(tmp_path: Path) -> None:
     tools = await dispatcher.read_catalog()
     assert isinstance(tools, list)
     tool_names = [t.get("name") for t in tools]
-    assert "repl_execute" in tool_names
-    assert "execute_code" in tool_names
+    # Asserts the exact base tool active for the current environment setting
+    assert EXPECTED_BASE_TOOL in tool_names
 
 
 @pytest.mark.asyncio
@@ -47,8 +53,7 @@ async def test_data_plane_built_in_and_dynamic_catalog_merging(tmp_path: Path) -
     tools = await dispatcher.read_catalog()
 
     tool_names = [t.get("name") for t in tools]
-    assert "repl_execute" in tool_names
-    assert "execute_code" in tool_names
+    assert EXPECTED_BASE_TOOL in tool_names
     assert "arm_sme2_kernel" in tool_names
 
 
@@ -60,11 +65,7 @@ async def test_data_plane_hot_reloading_on_mtime_change(tmp_path: Path) -> None:
     tools_dir.mkdir(parents=True, exist_ok=True)
     catalog_path = tools_dir / "catalog.json"
 
-    catalog_v1 = {
-        "tools": [
-            {"name": "tool_v1", "description": "Version 1"}
-        ]
-    }
+    catalog_v1 = {"tools": [{"name": "tool_v1", "description": "Version 1"}]}
     catalog_path.write_text(json.dumps(catalog_v1), encoding="utf-8")
 
     dispatcher = LocalToolDispatcher(tools_dir=tools_dir)
@@ -101,11 +102,7 @@ async def test_data_plane_error_isolation_corrupted_json(tmp_path: Path) -> None
     tools_dir.mkdir(parents=True, exist_ok=True)
     catalog_path = tools_dir / "catalog.json"
 
-    valid_catalog = {
-        "tools": [
-            {"name": "stable_tool", "description": "Last valid tool state"}
-        ]
-    }
+    valid_catalog = {"tools": [{"name": "stable_tool", "description": "Last valid tool state"}]}
     catalog_path.write_text(json.dumps(valid_catalog), encoding="utf-8")
 
     dispatcher = LocalToolDispatcher(tools_dir=tools_dir)
@@ -129,7 +126,7 @@ async def test_data_plane_native_host_fallback(tmp_path: Path) -> None:
     """Verifies tools with entrypoint=None dispatch to native in-memory handlers."""
     dispatcher = LocalToolDispatcher(tools_dir=tmp_path)
 
-    res = await dispatcher.dispatch_tool_call("repl_execute", {"code": "result = 1 + 1"})
+    res = await dispatcher.dispatch_tool_call(EXPECTED_BASE_TOOL, {"code": "1 + 1"})
     assert res.get("jsonrpc") == "2.0"
     assert "result" in res
     assert res["result"]["status"] == "SUCCESS"
@@ -144,10 +141,7 @@ async def test_data_plane_python_script_entrypoint_binding(tmp_path: Path) -> No
     tools_dir.mkdir(parents=True, exist_ok=True)
 
     script_path = tools_dir / "my_script.py"
-    script_content = (
-        "import json, sys\n"
-        "print(json.dumps({'status': 'SUCCESS', 'result': 84}))\n"
-    )
+    script_content = "import json, sys\nprint(json.dumps({'status': 'SUCCESS', 'result': 84}))\n"
     script_path.write_text(script_content, encoding="utf-8")
 
     catalog = {

@@ -9,7 +9,10 @@ __all__ = [
     "JSONRPCError",
     "MCPJsonRPCRequest",
     "MCPJsonRPCResponse",
-    "HealthStatusResponse",
+    "ToolsCallParams",
+    "ToolDefinitionSchema",
+    "ToolsListResult",
+    "ControlPlaneHealthResponse",
     "ToolRegistrationSchema",
 ]
 
@@ -22,6 +25,40 @@ class JSONRPCError(BaseModel):
     code: int = Field(..., description="JSON-RPC error code (e.g., -32601 Method Not Found)")
     message: str = Field(..., description="Short description of the error")
     data: Any | None = Field(None, description="Optional detailed error context or trace")
+
+
+class ToolsCallParams(BaseModel):
+    """Pydantic schema for parameters passed to 'tools/call' method."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str | None = Field(None, description="Target tool identifier name")
+    tool_name: str | None = Field(None, description="Alternative tool identifier alias")
+    arguments: dict[str, Any] = Field(
+        default_factory=dict, description="Dictionary of argument key-value pairs"
+    )
+
+
+class ToolDefinitionSchema(BaseModel):
+    """Pydantic schema describing an available tool in the catalog."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str = Field(..., description="Unique tool identifier name")
+    description: str = Field(..., description="Tool capability description")
+    inputSchema: dict[str, Any] = Field(  # noqa: N815
+        default_factory=dict, description="JSON Schema defining expected arguments"
+    )
+
+
+class ToolsListResult(BaseModel):
+    """Pydantic schema for successful 'tools/list' result payload."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    tools: list[dict[str, Any]] = Field(
+        default_factory=list, description="List of registered tool catalog definitions"
+    )
 
 
 class MCPJsonRPCRequest(BaseModel):
@@ -48,17 +85,18 @@ class MCPJsonRPCResponse(BaseModel):
     error: JSONRPCError | None = Field(None, description="Structured JSON-RPC error payload")
 
 
-class HealthStatusResponse(BaseModel):
-    """Pydantic schema for Control Plane health readiness responses."""
+class ControlPlaneHealthResponse(BaseModel):
+    """Pydantic schema for Control Plane gateway health readiness responses."""
 
     status: str = Field("healthy", description="Gateway readiness status")
     identity_layer: str = Field(
-        "keycloak_wif", description="Identity and OIDC Workload Identity Federation provider"
+        "keycloak_wif",
+        description="Identity and OIDC Workload Identity Federation provider",
     )
 
 
 class ToolRegistrationSchema(BaseModel):
-    """Pydantic schema for tool registration requests."""
+    """Pydantic schema for dynamic tool registration requests."""
 
     model_config = ConfigDict(extra="ignore")
 

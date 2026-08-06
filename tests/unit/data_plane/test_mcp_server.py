@@ -7,6 +7,7 @@ and ContextVar token reset behavior.
 import httpx
 import pytest
 
+from src.config import settings
 from src.data_plane.mcp_server import app, get_current_user_context
 
 DEFAULT_HEADERS = {
@@ -63,7 +64,11 @@ async def test_mcp_tools_list_method(async_mcp_client):
     assert data["id"] == "list-1"
     assert "tools" in data["result"]
     tool_names = [t["name"] for t in data["result"]["tools"]]
-    assert "optimize_kernel" in tool_names or "profile_and_optimize_kernel" in tool_names
+
+    expected_tool = (
+        "repl_execute" if getattr(settings, "ENABLE_CODE_MODE", False) else "execute_code"
+    )
+    assert expected_tool in tool_names
 
 
 @pytest.mark.asyncio

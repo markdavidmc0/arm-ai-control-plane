@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import httpx
 from fastapi import Depends, Header, HTTPException, status
 
-from src.control_plane.config import Settings, get_settings
+from src.config import Settings, get_settings
 from src.control_plane.schemas import UserContext
 from src.control_plane.services.llm_router import (
     LiteLLMClient,
@@ -45,6 +45,17 @@ def get_llm_router_service(
 ) -> LLMRouterService:
     """Dependency provider for LLMRouterService."""
     return LLMRouterService(llm_client=llm_client)
+
+
+async def get_data_plane_client(
+    settings: Settings = Depends(get_settings),
+) -> AsyncGenerator[httpx.AsyncClient, None]:
+    """Provides an HTTP client for communicating with the Data Plane service over network boundary."""
+    async with httpx.AsyncClient(
+        base_url=settings.DATA_PLANE_URL,
+        timeout=30.0,
+    ) as client:
+        yield client
 
 
 async def get_mcp_proxy(

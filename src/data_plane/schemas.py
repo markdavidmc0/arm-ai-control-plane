@@ -20,6 +20,55 @@ __all__ = [
 ]
 
 
+class MCPToolSchema(BaseModel):
+    name: str
+    description: str
+    inputSchema: dict[str, Any]  # noqa: N815
+
+
+EXECUTE_CODE_TOOL_SCHEMA = MCPToolSchema(
+    name="execute_code",
+    description="Executes sandboxed Python code within the SFI MontyEngine.",
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "code": {
+                "type": "string",
+                "description": "Python code snippet to execute.",
+            },
+            "inputs": {
+                "type": "object",
+                "description": "Optional input variable bindings mapping.",
+            },
+        },
+        "required": ["code"],
+    },
+).model_dump(by_alias=True)
+
+REPL_EXECUTE_TOOL_SCHEMA = MCPToolSchema(
+    name="repl_execute",
+    description="Executes stateful sandboxed Python code in REPL mode.",
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "code": {
+                "type": "string",
+                "description": "Python REPL code snippet to execute.",
+            }
+        },
+        "required": ["code"],
+    },
+).model_dump(by_alias=True)
+
+
+class DataPlaneHealthResponse(BaseModel):
+    """Pydantic schema for Data Plane execution engine health readiness responses."""
+
+    status: str = Field("healthy", description="Execution worker readiness status")
+    service: str = Field("data-plane", description="Microservice component identifier")
+    engine: str = Field("gvisor_monty", description="Sandboxed execution engine provider")
+
+
 class DataPlaneUserContext(BaseModel):
     """User identity context parsed from pre-authenticated downstream HTTP headers."""
 

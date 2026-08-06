@@ -107,11 +107,11 @@ import logfire
 uid = 123
 
 # Correct - each {key} becomes a searchable attribute in the Logfire UI
-logfire.info('Created user {user_id}', user_id=uid)
-logfire.error('Payment failed {amount} {currency}', amount=100, currency='USD')
+logfire.info("Created user {user_id}", user_id=uid)
+logfire.error("Payment failed {amount} {currency}", amount=100, currency="USD")
 
 # Wrong - creates a flat string, nothing is searchable
-logfire.info(f'Created user {uid}')
+logfire.info(f"Created user {uid}")
 ```
 
 For grouping related operations and measuring duration, use spans:
@@ -120,14 +120,13 @@ For grouping related operations and measuring duration, use spans:
 import logfire
 
 
-async def process_order(order_id: int):
-    ...
+async def process_order(order_id: int): ...
 
 
 async def handle_order(order_id: int):
-    with logfire.span('Processing order {order_id}', order_id=order_id):
+    with logfire.span("Processing order {order_id}", order_id=order_id):
         total = 100
-        logfire.info('Calculated total {total}', total=total)
+        logfire.info("Calculated total {total}", total=total)
 ```
 
 For exceptions, use `logfire.exception()` which automatically captures the traceback:
@@ -136,15 +135,14 @@ For exceptions, use `logfire.exception()` which automatically captures the trace
 import logfire
 
 
-async def process_order(order_id: int):
-    ...
+async def process_order(order_id: int): ...
 
 
 async def handle_order(order_id: int):
     try:
         await process_order(order_id)
     except Exception:
-        logfire.exception('Failed to process order {order_id}', order_id=order_id)
+        logfire.exception("Failed to process order {order_id}", order_id=order_id)
         raise
 ```
 
@@ -166,8 +164,8 @@ import logfire
 logfire.configure()
 logfire.instrument_pydantic_ai()  # captures agent runs, tool calls, LLM request/response
 # or:
-logfire.instrument_openai()       # captures chat completions, embeddings, token counts
-logfire.instrument_anthropic()    # captures messages, token usage
+logfire.instrument_openai()  # captures chat completions, embeddings, token counts
+logfire.instrument_anthropic()  # captures messages, token usage
 ```
 
 For PydanticAI, each agent run becomes a parent span containing child spans for every tool call and LLM request.
@@ -264,9 +262,9 @@ segment data. Set them once, at configure time or via environment:
 import logfire
 
 logfire.configure(
-    service_name='checkout-api',
-    service_version='1.4.2',
-    environment='prod',
+    service_name="checkout-api",
+    service_version="1.4.2",
+    environment="prod",
 )
 ```
 
@@ -280,13 +278,13 @@ panels, and alerts. Create them once and record throughout (Python shown; see
 the per-language references for JS/Rust):
 
 ```python
-counter = logfire.metric_counter('orders_processed', unit='1')
-counter.add(1, {'status': 'success'})
+counter = logfire.metric_counter("orders_processed", unit="1")
+counter.add(1, {"status": "success"})
 
-histogram = logfire.metric_histogram('request_duration', unit='s')
-histogram.record(0.123, {'endpoint': '/api/users'})
+histogram = logfire.metric_histogram("request_duration", unit="s")
+histogram.record(0.123, {"endpoint": "/api/users"})
 
-gauge = logfire.metric_gauge('active_connections')
+gauge = logfire.metric_gauge("active_connections")
 gauge.set(42)
 ```
 

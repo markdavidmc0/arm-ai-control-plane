@@ -11,7 +11,7 @@ import json
 import os
 import secrets
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 # Absolute path resolution anchored to repo rootpython scripts/manage_keys.py create --name "curl-test" --role dev
@@ -33,12 +33,12 @@ def hash_key(key: str, salt: str) -> str:
 
 def load_keys() -> list[dict]:
     """Loads keys database from the configured json file.
-    
+
     Aborts execution on JSON parse error to prevent accidental file clobbering.
     """
     if KEYS_FILE.exists():
         try:
-            with open(KEYS_FILE, "r", encoding="utf-8") as f:
+            with open(KEYS_FILE, encoding="utf-8") as f:
                 data = json.load(f)
                 return data.get("keys", [])
         except json.JSONDecodeError as e:
@@ -83,7 +83,7 @@ def create_key(name: str, role: str, scopes: list[str]) -> None:
         "hash": digest,
         "salt": salt,
         "scopes": scopes,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "status": "active",
     }
 
@@ -129,7 +129,7 @@ def revoke_key(key_id: str) -> None:
     for k in keys:
         if k.get("key_id") == key_id:
             k["status"] = "revoked"
-            k["revoked_at"] = datetime.now(timezone.utc).isoformat()
+            k["revoked_at"] = datetime.now(UTC).isoformat()
             found = True
             break
 

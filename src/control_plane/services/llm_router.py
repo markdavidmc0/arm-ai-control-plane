@@ -93,9 +93,7 @@ class LLMRouterService:
             )
             raise
         except Exception as e:
-            logger.error(
-                f"[LLMRouterService] Unexpected execution error for model [{model}]: {e}"
-            )
+            logger.error(f"[LLMRouterService] Unexpected execution error for model [{model}]: {e}")
             raise
 
         latency_ms = round((time.time() - start_time) * 1000.0, 2)

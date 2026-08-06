@@ -49,13 +49,15 @@ from logging.config import dictConfig
 import logfire
 
 logfire.configure()
-dictConfig({
-    'version': 1,
-    'handlers': {
-        'logfire': {'class': 'logfire.LogfireLoggingHandler'},
-    },
-    'root': {'handlers': ['logfire']},
-})
+dictConfig(
+    {
+        "version": 1,
+        "handlers": {
+            "logfire": {"class": "logfire.LogfireLoggingHandler"},
+        },
+        "root": {"handlers": ["logfire"]},
+    }
+)
 ```
 
 ## Suppressing Noisy Libraries
@@ -65,8 +67,8 @@ Some libraries emit excessive debug logs. Silence them at the `logging` level:
 ```python
 import logging
 
-logging.getLogger('httpcore').setLevel(logging.WARNING)
-logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 ```
 
 ## Custom Metrics
@@ -91,14 +93,12 @@ Use the `capfire` pytest fixture to assert on emitted spans without sending data
 ```python
 from logfire.testing import CaptureLogfire
 
+
 def test_order_processing(capfire: CaptureLogfire) -> None:
     process_order(order_id=123)
 
     spans = capfire.exporter.exported_spans_as_dict()
-    assert any(
-        span['attributes'].get('order_id') == 123
-        for span in spans
-    )
+    assert any(span["attributes"].get("order_id") == 123 for span in spans)
 ```
 
 Configure logfire with `send_to_logfire=False` in test fixtures to prevent production data leakage.
